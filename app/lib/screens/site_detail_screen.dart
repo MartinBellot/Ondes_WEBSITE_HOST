@@ -1030,11 +1030,14 @@ class _FormRow extends StatelessWidget {
   const _FormRow({required this.children});
 
   @override
-  Widget build(BuildContext context) => Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: children.map((c) => Expanded(child: c)).toList()
-          ..insertBetween(const SizedBox(width: 14)),
-      );
+  Widget build(BuildContext context) {
+    final items = <Widget>[];
+    for (int i = 0; i < children.length; i++) {
+      if (i > 0) items.add(const SizedBox(width: 14));
+      items.add(Expanded(child: children[i]));
+    }
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: items);
+  }
 }
 
 class _FormField extends StatelessWidget {

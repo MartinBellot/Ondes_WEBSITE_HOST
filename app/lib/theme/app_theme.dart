@@ -40,7 +40,7 @@ class AppTheme {
         titleMedium: GoogleFonts.inter(color: AppColors.textPrimary,   fontSize: 16, fontWeight: FontWeight.w500),
         labelLarge:  GoogleFonts.inter(color: AppColors.textPrimary,   fontSize: 14, fontWeight: FontWeight.w500),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: AppColors.surface,
         elevation: 0,
         shape: RoundedRectangleBorder(

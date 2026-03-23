@@ -1,7 +1,11 @@
 from pathlib import Path
 from datetime import timedelta
+import warnings
 import dj_database_url
 from decouple import config
+
+# Suppress noisy TripleDES deprecation warnings from paramiko (harmless, fixed upstream in paramiko 4+)
+warnings.filterwarnings('ignore', message='TripleDES has been moved', module='paramiko')
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -62,23 +66,37 @@ TEMPLATES = [
 ]
 
 # ─── Database ─────────────────────────────────────────────────────────────────
-DATABASES = {
-    'default': dj_database_url.parse(
-        config('DATABASE_URL', default='postgresql://ondes_user:ondes_password@localhost:5432/ondes_db')
-    )
-}
+# When DATABASE_URL is not set (local dev), fall back to SQLite.
+_DATABASE_URL = config('DATABASE_URL', default='')
+
+if _DATABASE_URL:
+    DATABASES = {'default': dj_database_url.parse(_DATABASE_URL)}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 # ─── Django Channels / Redis ──────────────────────────────────────────────────
-REDIS_URL = config('REDIS_URL', default='redis://localhost:6379/0')
+# When REDIS_URL is not set (local dev), use the in-process InMemoryChannelLayer.
+# WebSockets still work; they just can't span multiple processes.
+REDIS_URL = config('REDIS_URL', default='')
 
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            'hosts': [REDIS_URL],
-        },
-    },
-}
+if REDIS_URL:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {'hosts': [REDIS_URL]},
+        }
+    }
+else:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        }
+    }
 
 # ─── REST Framework ───────────────────────────────────────────────────────────
 REST_FRAMEWORK = {

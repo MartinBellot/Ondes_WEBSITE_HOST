@@ -2,7 +2,7 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from docker.errors import NotFound, APIError
+from docker.errors import DockerException, NotFound, APIError
 
 from . import services
 from .serializers import CreateContainerSerializer
@@ -16,7 +16,7 @@ class ContainerListView(APIView):
         try:
             containers = services.list_containers()
             return Response(containers)
-        except APIError as e:
+        except (DockerException, APIError) as e:
             return Response({'error': str(e)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
 
@@ -36,7 +36,7 @@ class ContainerActionView(APIView):
             return Response(result)
         except NotFound:
             return Response({'error': 'Container not found'}, status=status.HTTP_404_NOT_FOUND)
-        except APIError as e:
+        except (DockerException, APIError) as e:
             return Response({'error': str(e)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
 
@@ -68,5 +68,5 @@ class CreateContainerView(APIView):
                 volume_container=data.get('volume_container', ''),
             )
             return Response(result, status=status.HTTP_201_CREATED)
-        except APIError as e:
+        except (DockerException, APIError) as e:
             return Response({'error': str(e)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
