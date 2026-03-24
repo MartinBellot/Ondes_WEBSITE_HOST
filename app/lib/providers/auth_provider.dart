@@ -14,12 +14,30 @@ class AuthProvider extends ChangeNotifier {
   String? get error => _error;
 
   AuthProvider() {
-    _checkPersistedToken();
+    // Wire the force-logout callback so the interceptor can trigger it.
+    _api.onForceLogout = _handleForceLogout;
+    _restoreSession();
   }
 
-  Future<void> _checkPersistedToken() async {
+  /// Called by the Dio interceptor when the refresh token is expired/invalid.
+  void _handleForceLogout() {
+    _isAuthenticated = false;
+    notifyListeners();
+  }
+
+  /// On startup, try to silently restore the session via the refresh token.
+  /// This survives API restarts, token rotation, and app restarts.
+  Future<void> _restoreSession() async {
     final prefs = await SharedPreferences.getInstance();
-    _isAuthenticated = prefs.getString('access_token') != null;
+    final hasRefresh = prefs.getString('refresh_token') != null;
+
+    if (hasRefresh) {
+      final restored = await _api.tryRestoreSession();
+      _isAuthenticated = restored;
+    } else {
+      _isAuthenticated = false;
+    }
+
     _isLoading = false;
     notifyListeners();
   }
@@ -43,6 +61,13 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
+    final refreshToken = prefs.getString('refresh_token');
+    // Blacklist the refresh token server-side (best-effort — ignore errors).
+    if (refreshToken != null) {
+      try {
+        await _api.logout(refreshToken);
+      } catch (_) {}
+    }
     await prefs.remove('access_token');
     await prefs.remove('refresh_token');
     _isAuthenticated = false;

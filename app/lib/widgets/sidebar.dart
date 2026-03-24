@@ -2,21 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
 import '../providers/auth_provider.dart';
-import '../screens/sites_screen.dart';
-import '../screens/dashboard_screen.dart';
-import '../screens/docker_manager_screen.dart';
-import '../screens/terminal_screen.dart';
 
 class Sidebar extends StatelessWidget {
   final int selectedIndex;
+  final ValueChanged<int> onNavigate;
 
-  const Sidebar({super.key, required this.selectedIndex});
+  const Sidebar(
+      {super.key, required this.selectedIndex, required this.onNavigate});
 
   static const _items = [
-    _NavItem(icon: Icons.web_outlined,          label: 'Mes Sites'),
-    _NavItem(icon: Icons.dashboard_outlined,    label: 'Dashboard'),
-    _NavItem(icon: Icons.inventory_2_outlined,  label: 'Containers'),
-    _NavItem(icon: Icons.terminal_outlined,     label: 'Terminal'),
+    _NavItem(icon: Icons.web_outlined, label: 'Mes Sites'),
+    _NavItem(icon: Icons.dashboard_outlined, label: 'Dashboard'),
+    _NavItem(icon: Icons.inventory_2_outlined, label: 'Containers'),
+    _NavItem(icon: Icons.terminal_outlined, label: 'Terminal'),
   ];
 
   @override
@@ -35,18 +33,20 @@ class Sidebar extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
             child: Row(
               children: [
-                Container(
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    color: AppColors.accent,
-                    borderRadius: BorderRadius.circular(6),
+                SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(40),
+                    child: Image.asset(
+                      'assets/images/icon.png',
+                      fit: BoxFit.contain,
+                    )
                   ),
-                  child: const Icon(Icons.waves, color: Colors.black, size: 18),
                 ),
                 const SizedBox(width: 10),
                 const Text(
-                  'Ondes',
+                  'HOST',
                   style: TextStyle(
                     color: AppColors.textPrimary,
                     fontSize: 16,
@@ -63,7 +63,7 @@ class Sidebar extends StatelessWidget {
             _SidebarTile(
               item: _items[i],
               isSelected: selectedIndex == i,
-              onTap: () => _navigate(context, i),
+              onTap: () => onNavigate(i),
             ),
           const Spacer(),
           const Divider(height: 1),
@@ -76,24 +76,6 @@ class Sidebar extends StatelessWidget {
           ),
           const SizedBox(height: 8),
         ],
-      ),
-    );
-  }
-
-  void _navigate(BuildContext context, int index) {
-    if (index == selectedIndex) return;
-    final Widget screen;
-    switch (index) {
-      case 0: screen = const SitesScreen();         break;
-      case 1: screen = const DashboardScreen();      break;
-      case 2: screen = const DockerManagerScreen();  break;
-      case 3: screen = const TerminalScreen();       break;
-      default: return;
-    }
-    Navigator.of(context).pushReplacement(
-      PageRouteBuilder(
-        pageBuilder: (_, __, ___) => screen,
-        transitionDuration: Duration.zero,
       ),
     );
   }
@@ -141,7 +123,7 @@ class _SidebarTileState extends State<_SidebarTile> {
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovering = true),
-      onExit:  (_) => setState(() => _hovering = false),
+      onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
         onTap: widget.onTap,
         child: Container(
@@ -164,7 +146,8 @@ class _SidebarTileState extends State<_SidebarTile> {
                 style: TextStyle(
                   color: color,
                   fontSize: 14,
-                  fontWeight: widget.isSelected ? FontWeight.w500 : FontWeight.w400,
+                  fontWeight:
+                      widget.isSelected ? FontWeight.w500 : FontWeight.w400,
                 ),
               ),
             ],

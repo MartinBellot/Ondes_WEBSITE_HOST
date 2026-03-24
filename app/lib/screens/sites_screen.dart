@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../providers/sites_provider.dart';
-import '../widgets/sidebar.dart';
 import 'site_detail_screen.dart';
 
 class SitesScreen extends StatefulWidget {
@@ -42,100 +41,103 @@ class _SitesScreenState extends State<SitesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Row(
+      body: Column(
         children: [
-          const Sidebar(selectedIndex: 0),
-          Expanded(
-            child: Column(
+          // Header
+          Container(
+            height: 56,
+            padding: const EdgeInsets.symmetric(horizontal: 28),
+            decoration: const BoxDecoration(
+              color: AppColors.surface,
+              border: Border(bottom: BorderSide(color: AppColors.border)),
+            ),
+            child: Row(
               children: [
-                // Header
-                Container(
-                  height: 56,
-                  padding: const EdgeInsets.symmetric(horizontal: 28),
-                  decoration: const BoxDecoration(
-                    color: AppColors.surface,
-                    border: Border(bottom: BorderSide(color: AppColors.border)),
-                  ),
-                  child: Row(
-                    children: [
-                      const Expanded(
-                        child: Text(
-                          'Mes Sites',
-                          style: TextStyle(
-                            color: AppColors.textPrimary,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      Consumer<SitesProvider>(
-                        builder: (_, sites, __) => TextButton.icon(
-                          onPressed: sites.isLoading ? null : () => context.read<SitesProvider>().fetchSites(),
-                          icon: const Icon(Icons.refresh, size: 14, color: AppColors.textSecondary),
-                          label: const Text('Refresh', style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton.icon(
-                        onPressed: _createSite,
-                        icon: const Icon(Icons.add, size: 16),
-                        label: const Text('Nouveau site'),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        ),
-                      ),
-                    ],
+                const Expanded(
+                  child: Text(
+                    'Mes Sites',
+                    style: TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
-                // Body
-                Expanded(
-                  child: Consumer<SitesProvider>(
-                    builder: (context, sites, _) {
-                      if (sites.isLoading && sites.sites.isEmpty) {
-                        return const Center(
-                          child: CircularProgressIndicator(color: AppColors.accent),
-                        );
-                      }
-                      if (sites.sites.isEmpty) {
-                        return _EmptyState(onCreateTap: _createSite);
-                      }
-                      return SingleChildScrollView(
-                        padding: const EdgeInsets.all(28),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '${sites.sites.length} site${sites.sites.length > 1 ? 's' : ''}',
-                              style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
-                            ),
-                            const SizedBox(height: 16),
-                            Wrap(
-                              spacing: 16,
-                              runSpacing: 16,
-                              children: sites.sites
-                                  .map<Widget>((s) => SiteCard(
-                                        site: s,
-                                        onTap: () => Navigator.of(context).push(
-                                          MaterialPageRoute(
-                                            builder: (_) => SiteDetailScreen(site: s),
-                                          ),
-                                        ),
-                                        onDelete: () async {
-                                          final confirmed = await _confirmDelete(context, s['name']);
-                                          if (confirmed && context.mounted) {
-                                            context.read<SitesProvider>().deleteSite(s['id'] as int);
-                                          }
-                                        },
-                                      ))
-                                  .toList(),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
+                Consumer<SitesProvider>(
+                  builder: (_, sites, __) => TextButton.icon(
+                    onPressed: sites.isLoading
+                        ? null
+                        : () => context.read<SitesProvider>().fetchSites(),
+                    icon: const Icon(Icons.refresh,
+                        size: 14, color: AppColors.textSecondary),
+                    label: const Text('Refresh',
+                        style: TextStyle(
+                            color: AppColors.textSecondary, fontSize: 13)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton.icon(
+                  onPressed: _createSite,
+                  icon: const Icon(Icons.add, size: 16),
+                  label: const Text('Nouveau site'),
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
                   ),
                 ),
               ],
+            ),
+          ),
+          // Body
+          Expanded(
+            child: Consumer<SitesProvider>(
+              builder: (context, sites, _) {
+                if (sites.isLoading && sites.sites.isEmpty) {
+                  return const Center(
+                    child: CircularProgressIndicator(color: AppColors.accent),
+                  );
+                }
+                if (sites.sites.isEmpty) {
+                  return _EmptyState(onCreateTap: _createSite);
+                }
+                return SingleChildScrollView(
+                  padding: const EdgeInsets.all(28),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${sites.sites.length} site${sites.sites.length > 1 ? 's' : ''}',
+                        style: const TextStyle(
+                            color: AppColors.textMuted, fontSize: 13),
+                      ),
+                      const SizedBox(height: 16),
+                      Wrap(
+                        spacing: 16,
+                        runSpacing: 16,
+                        children: sites.sites
+                            .map<Widget>((s) => SiteCard(
+                                  site: s,
+                                  onTap: () => Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => SiteDetailScreen(site: s),
+                                    ),
+                                  ),
+                                  onDelete: () async {
+                                    final confirmed = await _confirmDelete(
+                                        context, s['name']);
+                                    if (confirmed && context.mounted) {
+                                      context
+                                          .read<SitesProvider>()
+                                          .deleteSite(s['id'] as int);
+                                    }
+                                  },
+                                ))
+                            .toList(),
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
           ),
         ],
@@ -152,7 +154,8 @@ class _SitesScreenState extends State<SitesScreen> {
               borderRadius: BorderRadius.circular(8),
               side: const BorderSide(color: AppColors.border),
             ),
-            title: const Text('Supprimer le site', style: TextStyle(color: AppColors.textPrimary)),
+            title: const Text('Supprimer le site',
+                style: TextStyle(color: AppColors.textPrimary)),
             content: Text(
               'Voulez-vous supprimer "$name" ? Les conteneurs associés ne seront pas supprimés.',
               style: const TextStyle(color: AppColors.textSecondary),
@@ -160,11 +163,13 @@ class _SitesScreenState extends State<SitesScreen> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Annuler', style: TextStyle(color: AppColors.textSecondary)),
+                child: const Text('Annuler',
+                    style: TextStyle(color: AppColors.textSecondary)),
               ),
               ElevatedButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                style: ElevatedButton.styleFrom(backgroundColor: AppColors.accentRed),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.accentRed),
                 child: const Text('Supprimer'),
               ),
             ],
@@ -180,7 +185,11 @@ class SiteCard extends StatefulWidget {
   final VoidCallback onTap;
   final VoidCallback onDelete;
 
-  const SiteCard({super.key, required this.site, required this.onTap, required this.onDelete});
+  const SiteCard(
+      {super.key,
+      required this.site,
+      required this.onTap,
+      required this.onDelete});
 
   @override
   State<SiteCard> createState() => _SiteCardState();
@@ -193,13 +202,13 @@ class _SiteCardState extends State<SiteCard> {
   Widget build(BuildContext context) {
     final site = widget.site;
     final status = site['status'] as String? ?? 'idle';
-    final type   = site['site_type'] as String? ?? 'web';
-    final ssl    = site['ssl_enabled'] as bool? ?? false;
+    final type = site['site_type'] as String? ?? 'web';
+    final ssl = site['ssl_enabled'] as bool? ?? false;
 
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovering = true),
-      onExit:  (_) => setState(() => _hovering = false),
+      onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
@@ -210,7 +219,9 @@ class _SiteCardState extends State<SiteCard> {
             color: _hovering ? AppColors.surfaceVariant : AppColors.surface,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: _hovering ? AppColors.accent.withOpacity(0.4) : AppColors.border,
+              color: _hovering
+                  ? AppColors.accent.withOpacity(0.4)
+                  : AppColors.border,
             ),
           ),
           child: Column(
@@ -234,14 +245,17 @@ class _SiteCardState extends State<SiteCard> {
                   const SizedBox(width: 8),
                   GestureDetector(
                     onTap: widget.onDelete,
-                    child: const Icon(Icons.delete_outline, size: 16, color: AppColors.textMuted),
+                    child: const Icon(Icons.delete_outline,
+                        size: 16, color: AppColors.textMuted),
                   ),
                 ],
               ),
               const SizedBox(height: 6),
               // Domain
               Text(
-                site['domain']?.isNotEmpty == true ? site['domain'] : 'Aucun domaine configuré',
+                site['domain']?.isNotEmpty == true
+                    ? site['domain']
+                    : 'Aucun domaine configuré',
                 style: TextStyle(
                   color: site['domain']?.isNotEmpty == true
                       ? AppColors.accent
@@ -265,12 +279,14 @@ class _SiteCardState extends State<SiteCard> {
               if (site['github_repo']?.isNotEmpty == true)
                 Row(
                   children: [
-                    const Icon(Icons.code, size: 13, color: AppColors.textMuted),
+                    const Icon(Icons.code,
+                        size: 13, color: AppColors.textMuted),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
                         site['github_repo'],
-                        style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                        style: const TextStyle(
+                            color: AppColors.textMuted, fontSize: 12),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
@@ -297,9 +313,12 @@ class _SiteCardState extends State<SiteCard> {
 
   String _typeLabel(String type) {
     switch (type) {
-      case 'api':       return 'API';
-      case 'fullstack': return 'Fullstack';
-      default:          return 'Web';
+      case 'api':
+        return 'API';
+      case 'fullstack':
+        return 'Fullstack';
+      default:
+        return 'Web';
     }
   }
 }
@@ -312,14 +331,24 @@ class _StatusDot extends StatelessWidget {
   Widget build(BuildContext context) {
     Color color;
     switch (status) {
-      case 'running':   color = AppColors.accentGreen; break;
-      case 'deploying': color = AppColors.accentYellow; break;
-      case 'error':     color = AppColors.accentRed; break;
-      default:          color = AppColors.textMuted;
+      case 'running':
+        color = AppColors.accentGreen;
+        break;
+      case 'deploying':
+        color = AppColors.accentYellow;
+        break;
+      case 'error':
+        color = AppColors.accentRed;
+        break;
+      default:
+        color = AppColors.textMuted;
     }
     return Row(
       children: [
-        Container(width: 7, height: 7, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
         const SizedBox(width: 5),
         Text(status, style: TextStyle(color: color, fontSize: 11)),
       ],
@@ -340,7 +369,9 @@ class _Tag extends StatelessWidget {
           borderRadius: BorderRadius.circular(4),
           border: Border.all(color: color.withOpacity(0.3)),
         ),
-        child: Text(label, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w500)),
+        child: Text(label,
+            style: TextStyle(
+                color: color, fontSize: 11, fontWeight: FontWeight.w500)),
       );
 }
 
@@ -359,7 +390,8 @@ class _PortChip extends StatelessWidget {
         ),
         child: Text(
           '$label :$port',
-          style: GoogleFonts.jetBrainsMono(color: AppColors.textSecondary, fontSize: 11),
+          style: GoogleFonts.jetBrainsMono(
+              color: AppColors.textSecondary, fontSize: 11),
         ),
       );
 }
@@ -374,11 +406,15 @@ class _EmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.web_asset_off_outlined, size: 48, color: AppColors.textMuted),
+            const Icon(Icons.web_asset_off_outlined,
+                size: 48, color: AppColors.textMuted),
             const SizedBox(height: 16),
             const Text(
               'Aucun site pour le moment',
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 16, fontWeight: FontWeight.w500),
+              style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500),
             ),
             const SizedBox(height: 8),
             const Text(
@@ -406,14 +442,15 @@ class _NewSiteDialog extends StatefulWidget {
 }
 
 class _NewSiteDialogState extends State<_NewSiteDialog> {
-  final _nameCtrl   = TextEditingController();
+  final _nameCtrl = TextEditingController();
   final _domainCtrl = TextEditingController();
   String _type = 'web';
   bool _creating = false;
 
   @override
   void dispose() {
-    _nameCtrl.dispose(); _domainCtrl.dispose();
+    _nameCtrl.dispose();
+    _domainCtrl.dispose();
     super.dispose();
   }
 
@@ -432,20 +469,31 @@ class _NewSiteDialogState extends State<_NewSiteDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Nouveau site', style: TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.w600)),
+            const Text('Nouveau site',
+                style: TextStyle(
+                    color: AppColors.textPrimary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600)),
             const SizedBox(height: 20),
             _DialogField('Nom du site', _nameCtrl, hint: 'mon-app'),
             const SizedBox(height: 14),
-            _DialogField('Nom de domaine (optionnel)', _domainCtrl, hint: 'app.example.com'),
+            _DialogField('Nom de domaine (optionnel)', _domainCtrl,
+                hint: 'app.example.com'),
             const SizedBox(height: 14),
-            const Text('Type', style: TextStyle(color: AppColors.textSecondary, fontSize: 13, fontWeight: FontWeight.w500)),
+            const Text('Type',
+                style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500)),
             const SizedBox(height: 6),
             DropdownButtonFormField<String>(
               value: _type,
               dropdownColor: AppColors.surfaceVariant,
-              style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
+              style:
+                  const TextStyle(color: AppColors.textPrimary, fontSize: 14),
               decoration: InputDecoration(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(6),
                   borderSide: const BorderSide(color: AppColors.border),
@@ -456,8 +504,8 @@ class _NewSiteDialogState extends State<_NewSiteDialog> {
                 ),
               ),
               items: const [
-                DropdownMenuItem(value: 'web',       child: Text('Web / Frontend')),
-                DropdownMenuItem(value: 'api',       child: Text('API / Backend')),
+                DropdownMenuItem(value: 'web', child: Text('Web / Frontend')),
+                DropdownMenuItem(value: 'api', child: Text('API / Backend')),
                 DropdownMenuItem(value: 'fullstack', child: Text('Fullstack')),
               ],
               onChanged: (v) => setState(() => _type = v ?? 'web'),
@@ -468,24 +516,31 @@ class _NewSiteDialogState extends State<_NewSiteDialog> {
               children: [
                 TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text('Annuler', style: TextStyle(color: AppColors.textSecondary)),
+                  child: const Text('Annuler',
+                      style: TextStyle(color: AppColors.textSecondary)),
                 ),
                 const SizedBox(width: 10),
                 ElevatedButton(
-                  onPressed: _creating ? null : () async {
-                    if (_nameCtrl.text.trim().isEmpty) return;
-                    setState(() => _creating = true);
-                    await widget.onCreate({
-                      'name':      _nameCtrl.text.trim(),
-                      'domain':    _domainCtrl.text.trim(),
-                      'site_type': _type,
-                    });
-                    if (mounted) setState(() => _creating = false);
-                  },
+                  onPressed: _creating
+                      ? null
+                      : () async {
+                          if (_nameCtrl.text.trim().isEmpty) return;
+                          setState(() => _creating = true);
+                          await widget.onCreate({
+                            'name': _nameCtrl.text.trim(),
+                            'domain': _domainCtrl.text.trim(),
+                            'site_type': _type,
+                          });
+                          if (mounted) setState(() => _creating = false);
+                        },
                   child: _creating
-                      ? const SizedBox(width: 14, height: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation(AppColors.background)))
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor:
+                                  AlwaysStoppedAnimation(AppColors.background)))
                       : const Text('Créer'),
                 ),
               ],
@@ -507,7 +562,11 @@ class _DialogField extends StatelessWidget {
   Widget build(BuildContext context) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(color: AppColors.textSecondary, fontSize: 13, fontWeight: FontWeight.w500)),
+          Text(label,
+              style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500)),
           const SizedBox(height: 6),
           TextFormField(
             controller: ctrl,

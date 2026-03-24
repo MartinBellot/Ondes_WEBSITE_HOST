@@ -12,6 +12,13 @@ class ApiService {
 
   late final Dio _dio;
 
+  /// Called when a token refresh fails (e.g. refresh token expired/blacklisted).
+  /// Wire this up to trigger a global logout in your AuthProvider.
+  void Function()? onForceLogout;
+
+  /// Whether a refresh is already in flight (prevents concurrent refresh loops).
+  bool _isRefreshing = false;
+
   ApiService() {
     _dio = Dio(BaseOptions(
       baseUrl: _baseUrl,
@@ -29,6 +36,57 @@ class ApiService {
         }
         handler.next(options);
       },
+      onError: (DioException error, handler) async {
+        // Only intercept 401s on non-refresh endpoints to avoid infinite loops.
+        final path = error.requestOptions.path;
+        if (error.response?.statusCode == 401 &&
+            !path.contains('/auth/refresh/') &&
+            !path.contains('/auth/login/') &&
+            !_isRefreshing) {
+          _isRefreshing = true;
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            final refreshToken = prefs.getString('refresh_token');
+            if (refreshToken == null) {
+              _isRefreshing = false;
+              onForceLogout?.call();
+              return handler.next(error);
+            }
+
+            // Use a bare Dio to avoid re-triggering this interceptor.
+            final refreshDio = Dio(BaseOptions(baseUrl: _baseUrl));
+            final res = await refreshDio.post('/auth/refresh/', data: {
+              'refresh': refreshToken,
+            });
+
+            final newAccess = res.data['access'] as String;
+            // simplejwt ROTATE_REFRESH_TOKENS returns a new refresh token.
+            final newRefresh = res.data['refresh'] as String?;
+
+            await prefs.setString('access_token', newAccess);
+            if (newRefresh != null) {
+              await prefs.setString('refresh_token', newRefresh);
+            }
+
+            _isRefreshing = false;
+
+            // Retry the original request with the new access token.
+            final opts = error.requestOptions;
+            opts.headers['Authorization'] = 'Bearer $newAccess';
+            final retryResponse = await _dio.fetch(opts);
+            return handler.resolve(retryResponse);
+          } catch (_) {
+            _isRefreshing = false;
+            // Refresh failed — force logout.
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.remove('access_token');
+            await prefs.remove('refresh_token');
+            onForceLogout?.call();
+            return handler.next(error);
+          }
+        }
+        handler.next(error);
+      },
     ));
   }
 
@@ -42,6 +100,34 @@ class ApiService {
     return res.data as Map<String, dynamic>;
   }
 
+  Future<void> logout(String refreshToken) async {
+    await _dio.post('/auth/logout/', data: {'refresh': refreshToken});
+  }
+
+  /// Tries to silently get a new access token using the stored refresh token.
+  /// Returns true if session was successfully restored.
+  Future<bool> tryRestoreSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    final refreshToken = prefs.getString('refresh_token');
+    if (refreshToken == null) return false;
+    try {
+      final refreshDio = Dio(BaseOptions(baseUrl: _baseUrl));
+      final res = await refreshDio.post('/auth/refresh/', data: {
+        'refresh': refreshToken,
+      });
+      await prefs.setString('access_token', res.data['access'] as String);
+      final newRefresh = res.data['refresh'] as String?;
+      if (newRefresh != null) {
+        await prefs.setString('refresh_token', newRefresh);
+      }
+      return true;
+    } catch (_) {
+      await prefs.remove('access_token');
+      await prefs.remove('refresh_token');
+      return false;
+    }
+  }
+
   // ── Docker ──────────────────────────────────────────────────────────────────
 
   Future<List<dynamic>> listContainers() async {
@@ -49,12 +135,14 @@ class ApiService {
     return res.data as List<dynamic>;
   }
 
-  Future<Map<String, dynamic>> createContainer(Map<String, dynamic> data) async {
+  Future<Map<String, dynamic>> createContainer(
+      Map<String, dynamic> data) async {
     final res = await _dio.post('/docker/containers/create/', data: data);
     return res.data as Map<String, dynamic>;
   }
 
-  Future<Map<String, dynamic>> containerAction(String containerId, String action) async {
+  Future<Map<String, dynamic>> containerAction(
+      String containerId, String action) async {
     final res = await _dio.post('/docker/containers/$containerId/$action/');
     return res.data as Map<String, dynamic>;
   }
@@ -99,7 +187,8 @@ class ApiService {
     return res.data as Map<String, dynamic>;
   }
 
-  Future<Map<String, dynamic>> updateSite(int id, Map<String, dynamic> data) async {
+  Future<Map<String, dynamic>> updateSite(
+      int id, Map<String, dynamic> data) async {
     final res = await _dio.patch('/sites/$id/', data: data);
     return res.data as Map<String, dynamic>;
   }
@@ -123,7 +212,8 @@ class ApiService {
     return res.data as Map<String, dynamic>;
   }
 
-  Future<Map<String, dynamic>> siteCertbot(int id, String domain, String email) async {
+  Future<Map<String, dynamic>> siteCertbot(
+      int id, String domain, String email) async {
     final res = await _dio.post('/sites/$id/certbot/', data: {
       'domain': domain,
       'email': email,
@@ -144,7 +234,8 @@ class ApiService {
   }
 
   Future<List<String>> githubListBranches(String token, String repo) async {
-    final res = await _dio.post('/github/branches/', data: {'token': token, 'repo': repo});
+    final res = await _dio
+        .post('/github/branches/', data: {'token': token, 'repo': repo});
     return (res.data as List<dynamic>).cast<String>();
   }
 }

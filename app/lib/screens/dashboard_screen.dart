@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
 import '../providers/docker_provider.dart';
-import '../widgets/sidebar.dart';
 import '../widgets/metric_card.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -24,85 +23,79 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Row(
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Sidebar(selectedIndex: 0),
+          _PageHeader(
+            title: 'Dashboard',
+            action: Consumer<DockerProvider>(
+              builder: (_, docker, __) =>
+                  _RefreshButton(docker.fetchContainers),
+            ),
+          ),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _PageHeader(
-                  title: 'Dashboard',
-                  action: Consumer<DockerProvider>(
-                    builder: (_, docker, __) => _RefreshButton(docker.fetchContainers),
-                  ),
-                ),
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(28),
-                    child: Consumer<DockerProvider>(
-                      builder: (context, docker, _) {
-                        final running = docker.containers
-                            .where((c) => c['status'] == 'running')
-                            .length;
-                        final total   = docker.containers.length;
-                        final stopped = total - running;
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(28),
+              child: Consumer<DockerProvider>(
+                builder: (context, docker, _) {
+                  final running = docker.containers
+                      .where((c) => c['status'] == 'running')
+                      .length;
+                  final total = docker.containers.length;
+                  final stopped = total - running;
 
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Overview',
-                              style: TextStyle(
-                                color: AppColors.textPrimary,
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
-                              ),
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Overview',
+                        style: TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Wrap(
+                        spacing: 16,
+                        runSpacing: 16,
+                        children: [
+                          SizedBox(
+                            width: 220,
+                            child: MetricCard(
+                              title: 'Running',
+                              value: docker.isLoading ? '…' : '$running',
+                              icon: Icons.play_circle_outline,
+                              iconColor: AppColors.accentGreen,
+                              subtitle: 'Active containers',
                             ),
-                            const SizedBox(height: 20),
-                            Wrap(
-                              spacing: 16,
-                              runSpacing: 16,
-                              children: [
-                                SizedBox(
-                                  width: 220,
-                                  child: MetricCard(
-                                    title: 'Running',
-                                    value: docker.isLoading ? '…' : '$running',
-                                    icon: Icons.play_circle_outline,
-                                    iconColor: AppColors.accentGreen,
-                                    subtitle: 'Active containers',
-                                  ),
-                                ),
-                                SizedBox(
-                                  width: 220,
-                                  child: MetricCard(
-                                    title: 'Total',
-                                    value: docker.isLoading ? '…' : '$total',
-                                    icon: Icons.inventory_2_outlined,
-                                    subtitle: '$stopped stopped',
-                                  ),
-                                ),
-                              ],
+                          ),
+                          SizedBox(
+                            width: 220,
+                            child: MetricCard(
+                              title: 'Total',
+                              value: docker.isLoading ? '…' : '$total',
+                              icon: Icons.inventory_2_outlined,
+                              subtitle: '$stopped stopped',
                             ),
-                            const SizedBox(height: 36),
-                            const Text(
-                              'Containers',
-                              style: TextStyle(
-                                color: AppColors.textPrimary,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            _ContainerTable(docker: docker),
-                          ],
-                        );
-                      },
-                    ),
-                  ),
-                ),
-              ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 36),
+                      const Text(
+                        'Containers',
+                        style: TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      _ContainerTable(docker: docker),
+                    ],
+                  );
+                },
+              ),
             ),
           ),
         ],
@@ -127,7 +120,8 @@ class _ContainerTable extends StatelessWidget {
       );
     }
     if (docker.containers.isEmpty) {
-      return _EmptyState('No containers found.\nDeploy one from the Containers tab.');
+      return _EmptyState(
+          'No containers found.\nDeploy one from the Containers tab.');
     }
     return Container(
       decoration: BoxDecoration(
@@ -180,7 +174,8 @@ class _ContainerRow extends StatelessWidget {
           ),
           Text(
             container['image'] ?? '—',
-            style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+            style:
+                const TextStyle(color: AppColors.textSecondary, fontSize: 13),
           ),
           const SizedBox(width: 16),
           _ChipButton(
@@ -236,7 +231,8 @@ class _RefreshButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) => TextButton.icon(
         onPressed: onPressed,
-        icon: const Icon(Icons.refresh, size: 14, color: AppColors.textSecondary),
+        icon:
+            const Icon(Icons.refresh, size: 14, color: AppColors.textSecondary),
         label: const Text(
           'Refresh',
           style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
@@ -270,7 +266,8 @@ class _ChipButton extends StatefulWidget {
   final String label;
   final Color color;
   final VoidCallback onTap;
-  const _ChipButton({required this.label, required this.color, required this.onTap});
+  const _ChipButton(
+      {required this.label, required this.color, required this.onTap});
 
   @override
   State<_ChipButton> createState() => _ChipButtonState();

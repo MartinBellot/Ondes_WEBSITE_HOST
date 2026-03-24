@@ -52,18 +52,20 @@ class _LoginScreenState extends State<LoginScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               // ── Logo ────────────────────────────────────────────────────
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: AppColors.accent,
-                  borderRadius: BorderRadius.circular(14),
+              SizedBox(
+                width: 70,
+                height: 70,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(40),
+                  child: Image.asset(
+                    'assets/images/icon.png',
+                    fit: BoxFit.contain,
+                  )
                 ),
-                child: const Icon(Icons.waves, color: Colors.black, size: 30),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 18),
               Text(
-                'Ondes',
+                'Ondes Host',
                 style: GoogleFonts.inter(
                   fontSize: 28,
                   fontWeight: FontWeight.w700,
@@ -73,9 +75,10 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 8),
               Text(
                 'Sign in to your infrastructure dashboard',
-                style: GoogleFonts.inter(fontSize: 14, color: AppColors.textSecondary),
+                style: GoogleFonts.inter(
+                    fontSize: 14, color: AppColors.textSecondary),
               ),
-              const SizedBox(height: 40),
+              const SizedBox(height: 20),
               // ── Card ────────────────────────────────────────────────────
               Container(
                 width: 380,
@@ -94,9 +97,11 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 6),
                       TextFormField(
                         controller: _usernameCtrl,
-                        style: GoogleFonts.inter(color: AppColors.textPrimary, fontSize: 14),
+                        style: GoogleFonts.inter(
+                            color: AppColors.textPrimary, fontSize: 14),
                         decoration: const InputDecoration(hintText: 'admin'),
-                        validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
+                        validator: (v) =>
+                            (v == null || v.isEmpty) ? 'Required' : null,
                         onFieldSubmitted: (_) => _submit(),
                       ),
                       const SizedBox(height: 16),
@@ -105,19 +110,24 @@ class _LoginScreenState extends State<LoginScreen> {
                       TextFormField(
                         controller: _passwordCtrl,
                         obscureText: _obscure,
-                        style: GoogleFonts.inter(color: AppColors.textPrimary, fontSize: 14),
+                        style: GoogleFonts.inter(
+                            color: AppColors.textPrimary, fontSize: 14),
                         decoration: InputDecoration(
                           hintText: '••••••••',
                           suffixIcon: IconButton(
                             icon: Icon(
-                              _obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                              _obscure
+                                  ? Icons.visibility_off_outlined
+                                  : Icons.visibility_outlined,
                               size: 18,
                               color: AppColors.textMuted,
                             ),
-                            onPressed: () => setState(() => _obscure = !_obscure),
+                            onPressed: () =>
+                                setState(() => _obscure = !_obscure),
                           ),
                         ),
-                        validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
+                        validator: (v) =>
+                            (v == null || v.isEmpty) ? 'Required' : null,
                         onFieldSubmitted: (_) => _submit(),
                       ),
                       const SizedBox(height: 24),
@@ -127,10 +137,12 @@ class _LoginScreenState extends State<LoginScreen> {
                           onPressed: _loading ? null : _submit,
                           child: _loading
                               ? const SizedBox(
-                                  width: 16, height: 16,
+                                  width: 16,
+                                  height: 16,
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation(AppColors.background),
+                                    valueColor: AlwaysStoppedAnimation(
+                                        AppColors.background),
                                   ),
                                 )
                               : const Text('Sign in'),

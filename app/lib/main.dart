@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'theme/app_theme.dart';
 import 'providers/auth_provider.dart';
 import 'providers/docker_provider.dart';
 import 'providers/sites_provider.dart';
 import 'providers/github_provider.dart';
 import 'screens/login_screen.dart';
-import 'screens/sites_screen.dart';
+import 'widgets/main_shell.dart';
 
 void main() {
   runApp(
@@ -41,9 +40,7 @@ class OndesApp extends StatelessWidget {
               ),
             );
           }
-          return auth.isAuthenticated
-              ? const SitesScreen()
-              : const LoginScreen();
+          return auth.isAuthenticated ? const MainShell() : const LoginScreen();
         },
       ),
     );
