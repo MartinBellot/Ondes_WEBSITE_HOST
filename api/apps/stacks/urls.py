@@ -6,6 +6,7 @@ from .views import (
     ComposeAppActionView,
     ComposeAppLogsView,
     ComposeAppEnvView,
+    ComposeAppVhostsView,
 )
 
 urlpatterns = [
@@ -15,4 +16,5 @@ urlpatterns = [
     path('<int:pk>/action/<str:action>/', ComposeAppActionView.as_view(), name='stack-action'),
     path('<int:pk>/logs/',            ComposeAppLogsView.as_view(),       name='stack-logs'),
     path('<int:pk>/env/',             ComposeAppEnvView.as_view(),        name='stack-env'),
+    path('<int:pk>/vhosts/',          ComposeAppVhostsView.as_view(),     name='stack-vhosts'),
 ]

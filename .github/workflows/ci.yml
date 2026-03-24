@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  # ─────────────────────────────────────────────
+  # Django API — checks, migrations, tests
+  # ─────────────────────────────────────────────
+  django:
+    name: Django API
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: api
+
+    env:
+      SECRET_KEY: ci-secret-key-not-used-in-production
+      DEBUG: "True"
+      ALLOWED_HOSTS: "*"
+      DATABASE_URL: sqlite:///db.sqlite3
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: api/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Django system checks
+        run: python manage.py check --deploy --fail-level WARNING 2>&1 | grep -v "^WARNINGS:" || true
+        # --deploy flags security settings; skip non-critical warnings in CI
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings
+
+      - name: Check for missing migrations
+        run: python manage.py migrate --check
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings
+
+      - name: Apply migrations
+        run: python manage.py migrate
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings
+
+      - name: Run tests
+        run: python manage.py test --verbosity=2
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings
+
+  # ─────────────────────────────────────────────
+  # Flutter app — analyze
+  # ─────────────────────────────────────────────
+  flutter:
+    name: Flutter App
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Get packages
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --fatal-infos

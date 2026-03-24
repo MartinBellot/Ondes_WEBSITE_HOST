@@ -336,4 +336,49 @@ class ApiService {
     final res = await _dio.get('/docker/status/');
     return res.data as Map<String, dynamic>;
   }
+
+  // ── NGINX Vhosts ──────────────────────────────────────────────────────────
+
+  /// List vhosts for a specific stack.
+  Future<List<dynamic>> listStackVhosts(int stackId) async {
+    final res = await _dio.get('/stacks/$stackId/vhosts/');
+    return res.data as List<dynamic>;
+  }
+
+  /// Create a new vhost (HTTP only initially).
+  /// [data] must include: stack (id), domain, upstream_port, service_label,
+  /// and optionally ssl_email.
+  Future<Map<String, dynamic>> createVhost(Map<String, dynamic> data) async {
+    final res = await _dio.post('/nginx/vhosts/', data: data);
+    return res.data as Map<String, dynamic>;
+  }
+
+  /// Update an existing vhost (e.g. change port or service_label).
+  Future<Map<String, dynamic>> updateVhost(
+      int id, Map<String, dynamic> data) async {
+    final res = await _dio.patch('/nginx/vhosts/$id/', data: data);
+    return res.data as Map<String, dynamic>;
+  }
+
+  /// Delete a vhost (removes the nginx config and reloads nginx).
+  Future<void> deleteVhost(int id) async {
+    await _dio.delete('/nginx/vhosts/$id/');
+  }
+
+  /// Run Certbot for a vhost. Body: { "email": "..." }
+  /// Returns the updated vhost object (with ssl_status, ssl_expires_at, etc.).
+  Future<Map<String, dynamic>> runCertbot(int vhostId, String email) async {
+    final res = await _dio.post(
+      '/nginx/vhosts/$vhostId/certbot/',
+      data: {'email': email},
+    );
+    return res.data as Map<String, dynamic>;
+  }
+
+  /// Refresh cert status from disk and return expiry info.
+  Future<Map<String, dynamic>> getCertStatus(int vhostId) async {
+    final res = await _dio.get('/nginx/vhosts/$vhostId/cert-status/');
+    return res.data as Map<String, dynamic>;
+  }
 }
+

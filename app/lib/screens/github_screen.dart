@@ -334,15 +334,16 @@ class _NotConnectedViewState extends State<_NotConnectedView> {
                       foregroundColor: AppColors.textSecondary),
                 ),
               const SizedBox(height: 8),
-              Row(children: [
-                const Icon(Icons.settings_outlined,
+              const Row(children: [
+                Icon(Icons.settings_outlined,
                     size: 28, color: AppColors.accent),
-                const SizedBox(width: 12),
-                const Text('Configuration OAuth GitHub',
+                SizedBox(width: 12),
+                Text('Configuration OAuth GitHub',
                     style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
-                        color: AppColors.textPrimary)),
+                        color: AppColors.textPrimary)
+                ),
               ]),
               const SizedBox(height: 8),
               const Text(
@@ -354,7 +355,7 @@ class _NotConnectedViewState extends State<_NotConnectedView> {
               const SizedBox(height: 24),
 
               // Step 1 — Navigate to GitHub
-              _WizardStep(
+              const _WizardStep(
                 number: '1',
                 title: 'Ouvrir GitHub Developer Settings',
                 child: Column(
@@ -370,14 +371,14 @@ class _NotConnectedViewState extends State<_NotConnectedView> {
               const SizedBox(height: 12),
 
               // Step 2 — Fill the form
-              _WizardStep(
+               _WizardStep(
                 number: '2',
                 title: 'Remplir le formulaire GitHub',
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // Application name
-                    _FormFieldGuide(
+                    const _FormFieldGuide(
                       label: 'Application name',
                       hint: 'Le nom qu\'affichera GitHub aux utilisateurs lors de la demande d\'autorisation.',
                       value: 'Ondes HOST',
@@ -385,7 +386,7 @@ class _NotConnectedViewState extends State<_NotConnectedView> {
                     ),
                     const SizedBox(height: 12),
                     // Homepage URL
-                    _FormFieldGuide(
+                    const _FormFieldGuide(
                       label: 'Homepage URL',
                       hint: 'URL principale de l\'application (doit être une URL valide).',
                       value: 'http://localhost:3000',
@@ -393,7 +394,7 @@ class _NotConnectedViewState extends State<_NotConnectedView> {
                     ),
                     const SizedBox(height: 12),
                     // Application description
-                    _FormFieldGuide(
+                    const _FormFieldGuide(
                       label: 'Application description',
                       hint: 'Optionnelle — description affichée sur la page d\'autorisation.',
                       value: 'Self-hosted infrastructure dashboard',
@@ -410,7 +411,7 @@ class _NotConnectedViewState extends State<_NotConnectedView> {
                     ),
                     const SizedBox(height: 12),
                     // Enable Device Flow
-                    _InstructionRow(
+                    const _InstructionRow(
                       icon: Icons.toggle_off_outlined,
                       text: 'Enable Device Flow — laisser décoché (non requis pour cette application).',
                     ),

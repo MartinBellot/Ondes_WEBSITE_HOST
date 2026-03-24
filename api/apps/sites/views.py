@@ -9,10 +9,25 @@ from .models import Site
 from .serializers import SiteSerializer, SiteListSerializer, CertbotRequestSerializer
 from .services import deploy_site
 from apps.nginx_manager.services import (
-    generate_reverse_proxy_config,
-    write_nginx_config,
-    run_certbot,
+    generate_vhost_config as generate_reverse_proxy_config,
+    write_vhost as _write_vhost_new,
+    run_certbot_for_domain as run_certbot,
 )
+
+
+def write_nginx_config(domain: str, config: str) -> dict:
+    """Compatibility shim: the new API takes (domain, port, ssl), not raw config."""
+    # Sites module calls this with a raw config string we can't re-parse;
+    # just write it directly to the vhosts dir.
+    from pathlib import Path
+    import os
+    from apps.nginx_manager.services import VHOSTS_DIR, reload_nginx
+    try:
+        VHOSTS_DIR.mkdir(parents=True, exist_ok=True)
+        (VHOSTS_DIR / f'{domain}.conf').write_text(config)
+        return reload_nginx()
+    except Exception as exc:
+        return {'status': 'error', 'message': str(exc)}
 
 
 class SiteListCreateView(generics.ListCreateAPIView):

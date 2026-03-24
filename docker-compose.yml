@@ -30,6 +30,8 @@ services:
     volumes:
       - ./api:/app
       - /var/run/docker.sock:/var/run/docker.sock
+      - nginx_vhosts:/nginx-vhosts
+      - letsencrypt:/etc/letsencrypt:ro
     ports:
       - "8000:8000"
     environment:
@@ -39,6 +41,8 @@ services:
       - DEBUG=${DEBUG:-True}
       - ALLOWED_HOSTS=${ALLOWED_HOSTS:-*}
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+      - NGINX_VHOSTS_DIR=/nginx-vhosts
+      - LETSENCRYPT_DIR=/etc/letsencrypt
     depends_on:
       db:
         condition: service_healthy
@@ -49,6 +53,35 @@ services:
                python manage.py collectstatic --noinput &&
                daphne -b 0.0.0.0 -p 8000 config.asgi:application"
 
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - nginx_vhosts:/etc/nginx/conf.d/vhosts
+      - letsencrypt:/etc/letsencrypt:ro
+      - certbot_webroot:/var/www/certbot:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  certbot:
+    image: certbot/certbot:latest
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot_webroot:/var/www/certbot
+    entrypoint: >
+      /bin/sh -c "trap exit TERM;
+      while :; do
+        certbot renew --webroot -w /var/www/certbot --quiet;
+        sleep 12h & wait $${!};
+      done"
+    restart: unless-stopped
+
   app:
     build: ./app
     ports:
@@ -58,3 +91,6 @@ services:
 
 volumes:
   postgres_data:
+  nginx_vhosts:
+  letsencrypt:
+  certbot_webroot:

@@ -10,3 +10,5 @@ python-decouple==3.8
 dj-database-url==2.1.0
 docker==7.1.0
 paramiko==3.4.0
+pyyaml==6.0.2
+cryptography>=42.0.0

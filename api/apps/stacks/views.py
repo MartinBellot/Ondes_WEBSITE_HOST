@@ -130,3 +130,20 @@ class ComposeAppEnvView(APIView):
         app.env_vars = env
         app.save(update_fields=['env_vars'])
         return Response({'env_vars': app.env_vars})
+
+
+class ComposeAppVhostsView(APIView):
+    """
+    GET  /api/stacks/{id}/vhosts/  — list nginx vhosts for a stack
+    Shortcut that delegates to the nginx_manager data joined by stack FK.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        app = ComposeApp.objects.filter(pk=pk, user=request.user).first()
+        if not app:
+            return Response({'error': 'Projet introuvable'}, status=status.HTTP_404_NOT_FOUND)
+        from apps.nginx_manager.models import NginxVhost
+        from apps.nginx_manager.serializers import NginxVhostSerializer
+        vhosts = NginxVhost.objects.filter(stack=app)
+        return Response(NginxVhostSerializer(vhosts, many=True).data)

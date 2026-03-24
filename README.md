@@ -19,9 +19,10 @@ A modern, self-hosted alternative to cPanel/Plesk — manage Docker stacks, GitH
 |---|---|
 | **Auth** | JWT login / register |
 | **GitHub Integration** | OAuth App link, repo browser, branch selector, auto-detect `docker-compose.yml` |
-| **Stacks** | Clone a GitHub repo, pick a compose file, set env vars and deploy — real-time streaming logs via WebSocket |
+| **Stacks** | Clone a GitHub repo, pick a compose file, set env vars and deploy — real-time streaming logs via WebSocket. nginx/certbot services in the repo's compose are automatically stripped and replaced by the platform's. |
 | **Docker Manager** | List, start, stop, restart, remove containers; live status |
-| **NGINX Manager** | Preview & write NGINX configs, run Certbot SSL |
+| **NGINX Manager** | Per-stack multi-domain vhost management — generate NGINX configs, reload without downtime, run Certbot on-demand, track cert expiry with auto-renewal every 12 h |
+| **Domaine & SSL** | "Domaine & SSL" tab in Stack Detail — add/remove vhosts, DNS guide, one-click SSL activation via Certbot, cert expiry countdown |
 | **SSH Terminal** | Live WebSocket shell (Paramiko) |
 
 ---
@@ -104,8 +105,9 @@ Credentials are stored in the database via the `GitHubOAuthConfig` singleton mod
 1. **Connect GitHub** (see above).
 2. Browse your repos → tap a repo.
 3. Select a branch, pick a `docker-compose.yml`, fill in optional env vars, give the project a name.
-4. Click **Déployer** — the server clones the repo, runs `docker compose up --build -d` and streams logs in real time.
+4. Click **Déployer** — the server clones the repo, automatically strips any `nginx` / `certbot` services from the compose file (using the platform's own managed instances instead), runs `docker compose up --build -d` and streams logs in real time.
 5. Manage the running stack from **Stack Detail**: start/stop/restart/redeploy, edit env vars, view logs.
+6. Open the **Domaine & SSL** tab → add a domain, follow the DNS guide, and activate Let's Encrypt SSL with one click.
 
 ---
 
@@ -155,13 +157,21 @@ Credentials are stored in the database via the `GitHubOAuthConfig` singleton mod
 | `GET`  | `/api/stacks/{id}/logs/` | Static logs |
 | `GET`  | `/api/stacks/{id}/env/` | Get env vars |
 | `PUT`  | `/api/stacks/{id}/env/` | Update env vars |
+| `GET`  | `/api/stacks/{id}/vhosts/` | List NGINX vhosts for this stack |
 
 ### NGINX
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/api/nginx/preview/` | Preview config |
-| `POST` | `/api/nginx/configure/` | Write config + reload |
-| `POST` | `/api/nginx/certbot/` | Run Certbot SSL |
+| `GET`    | `/api/nginx/vhosts/` | List all vhosts (filter: `?stack=<id>`) |
+| `POST`   | `/api/nginx/vhosts/` | Create vhost — writes NGINX config + reload |
+| `GET`    | `/api/nginx/vhosts/{id}/` | Vhost detail |
+| `PATCH`  | `/api/nginx/vhosts/{id}/` | Update vhost (rewrites config) |
+| `DELETE` | `/api/nginx/vhosts/{id}/` | Delete vhost + reload |
+| `POST`   | `/api/nginx/vhosts/{id}/certbot/` | Run Certbot for this domain; body: `{"email": "…"}` |
+| `GET`    | `/api/nginx/vhosts/{id}/cert-status/` | Refresh cert expiry from disk |
+| `POST`   | `/api/nginx/preview/` | *(legacy)* Preview raw config |
+| `POST`   | `/api/nginx/configure/` | *(legacy)* Write raw config + reload |
+| `POST`   | `/api/nginx/certbot/` | *(legacy)* Run Certbot (generic) |
 
 ### WebSocket endpoints
 | URL | Purpose |
@@ -180,6 +190,8 @@ Credentials are stored in the database via the `GitHubOAuthConfig` singleton mod
 | Docker control | `docker` SDK 7.1+ |
 | SSH | Paramiko |
 | GitHub | OAuth 2.0 (credentials in DB, no env vars) |
+| NGINX management | `pyyaml` (compose bypass), `cryptography` (cert expiry parsing) |
+| SSL | Let's Encrypt via `certbot/certbot:latest` — on-demand + 12 h auto-renewal |
 | Database | SQLite (local dev) / PostgreSQL 15 (production) |
 | Cache / WS layer | InMemoryChannelLayer (local dev) / Redis 7 (production) |
 | Frontend | Flutter 3.43 (macOS + web) |

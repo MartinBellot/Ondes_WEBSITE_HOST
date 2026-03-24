@@ -20,6 +20,82 @@ from channels.layers import get_channel_layer
 
 from .models import ComposeApp
 
+# Compose bypass — pyyaml is an explicit dependency (see requirements.txt)
+try:
+    import yaml
+    _YAML_AVAILABLE = True
+except ImportError:
+    _YAML_AVAILABLE = False
+
+# Service names or image fragments that should be bypassed on user repos
+# because the platform provides its own managed nginx + certbot.
+_BYPASS_SERVICE_NAMES = frozenset({'nginx', 'certbot', 'certbot-companion', 'letsencrypt'})
+_BYPASS_IMAGE_FRAGMENTS = ('nginx', 'certbot')
+
+
+def _is_managed_by_platform(service_name: str, service_def: dict) -> bool:
+    """Return True if this service should be removed (nginx / certbot handled by core)."""
+    if service_name.lower() in _BYPASS_SERVICE_NAMES:
+        return True
+    image = (service_def.get('image') or '').lower()
+    return any(frag in image for frag in _BYPASS_IMAGE_FRAGMENTS)
+
+
+def _strip_platform_services(compose_path: str, app_id: int) -> tuple[str, list[str]]:
+    """
+    Parse *compose_path*, remove nginx / certbot services (managed by the platform),
+    and write the modified compose to <dir>/docker-compose.ondes.yml.
+
+    Returns (effective_compose_filename, removed_service_names).
+    If yaml is unavailable or parsing fails, returns the original filename unchanged.
+    """
+    if not _YAML_AVAILABLE:
+        return os.path.basename(compose_path), []
+
+    try:
+        with open(compose_path) as f:
+            data = yaml.safe_load(f)
+    except Exception:
+        return os.path.basename(compose_path), []
+
+    if not isinstance(data, dict) or 'services' not in data:
+        return os.path.basename(compose_path), []
+
+    services = data.get('services') or {}
+    removed: list[str] = []
+
+    for svc_name in list(services.keys()):
+        svc_def = services[svc_name] or {}
+        if _is_managed_by_platform(svc_name, svc_def):
+            del services[svc_name]
+            removed.append(svc_name)
+
+    if not removed:
+        return os.path.basename(compose_path), []
+
+    # Clean up depends_on references pointing to removed services
+    for svc_def in services.values():
+        if not isinstance(svc_def, dict):
+            continue
+        dep = svc_def.get('depends_on')
+        if isinstance(dep, list):
+            svc_def['depends_on'] = [d for d in dep if d not in removed]
+            if not svc_def['depends_on']:
+                del svc_def['depends_on']
+        elif isinstance(dep, dict):
+            for r in removed:
+                dep.pop(r, None)
+            if not dep:
+                del svc_def['depends_on']
+
+    data['services'] = services
+    bypass_filename  = 'docker-compose.ondes.yml'
+    bypass_path      = os.path.join(os.path.dirname(compose_path), bypass_filename)
+    with open(bypass_path, 'w') as f:
+        yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+
+    return bypass_filename, removed
+
 
 def _broadcast(app_id: int, message: str, level: str = 'info'):
     """Send a log line to the WebSocket group for this deploy."""
@@ -130,14 +206,27 @@ def deploy_app(app_id: int):
         _broadcast(app_id, f'❌ {app.compose_file} introuvable.', 'error')
         return
 
+    # ── 3a. Bypass nginx / certbot services (platform manages them) ───────────
+    effective_compose, stripped = _strip_platform_services(compose_path, app_id)
+    if stripped:
+        stripped_names = ', '.join(stripped)
+        _broadcast(
+            app_id,
+            '\u26a0\ufe0f  Services g\u00e9r\u00e9s par la plateforme d\u00e9tect\u00e9s et ignor\u00e9s : '
+            + stripped_names + '. '
+            'Utilisez l\'onglet "Domaine & SSL" pour configurer NGINX et SSL.',
+            'warning',
+        )
+        _broadcast(app_id, f'\ud83d\udcdd Compose modifi\u00e9 \u00e9crit dans {effective_compose}.')
+
     _set_status(app, 'building', 'Build et démarrage des containers...')
-    _broadcast(app_id, f'🐳 Lancement de docker compose -f {app.compose_file} up -d --build...')
+    _broadcast(app_id, f'🐳 Lancement de docker compose -f {effective_compose} up -d --build...')
 
     # Use a unique project name to avoid collisions between apps
     project_name = f'ondes_{app.id}_{app.name.lower().replace(" ", "_")}'
 
     rc = _run_streaming(
-        ['docker', 'compose', '-f', app.compose_file, '-p', project_name, 'up', '-d', '--build'],
+        ['docker', 'compose', '-f', effective_compose, '-p', project_name, 'up', '-d', '--build'],
         cwd=project_dir,
         app_id=app_id,
     )
