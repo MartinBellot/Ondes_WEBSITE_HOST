@@ -390,5 +390,12 @@ class ApiService {
     final res = await _dio.get('/stacks/$stackId/check-update/');
     return res.data as Map<String, dynamic>;
   }
+
+  /// List running Docker containers for a stack (with port bindings).
+  /// Each item: {id, name, service, image, status, ports: [{container_port, host_port}]}
+  Future<List<dynamic>> getStackContainers(int stackId) async {
+    final res = await _dio.get('/stacks/$stackId/containers/');
+    return res.data as List<dynamic>;
+  }
 }
 

@@ -25,6 +25,10 @@ class NginxVhost(models.Model):
     upstream_port  = models.IntegerField(
         help_text='Port exposé sur l\'hôte par le container applicatif',
     )
+    container_name = models.CharField(
+        max_length=255, blank=True,
+        help_text='Nom du container Docker sélectionné lors de la création (référence)',
+    )
 
     # ── SSL ───────────────────────────────────────────────────────────────────
     ssl_enabled   = models.BooleanField(default=False)

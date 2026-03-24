@@ -149,6 +149,23 @@ class ComposeAppVhostsView(APIView):
         return Response(NginxVhostSerializer(vhosts, many=True).data)
 
 
+class ComposeAppContainersView(APIView):
+    """
+    GET /api/stacks/{id}/containers/
+    Returns running Docker containers for this stack's compose project,
+    with their host port bindings. Used by the frontend to let the user
+    pick a container instead of manually entering the upstream port.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        app = ComposeApp.objects.filter(pk=pk, user=request.user).first()
+        if not app:
+            return Response({'error': 'Projet introuvable'}, status=status.HTTP_404_NOT_FOUND)
+        project_name = f'ondes_{app.id}_{app.name.lower().replace(" ", "_")}'
+        return Response(services.get_stack_containers(project_name))
+
+
 class ComposeAppUpdateCheckView(APIView):
     """
     GET /api/stacks/{id}/check-update/

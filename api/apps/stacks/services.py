@@ -15,6 +15,8 @@ import tempfile
 import threading
 from datetime import datetime, timezone
 
+import docker as _docker_sdk
+
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
@@ -338,6 +340,46 @@ def remove_app(app_id: int):
 
     app.delete()
     return {'status': 'removed'}
+
+
+def get_stack_containers(project_name: str) -> list[dict]:
+    """
+    Return running containers for a given compose project with host port bindings.
+    Used by the 'Domaine & SSL' tab to let the user pick a container instead of
+    manually entering the upstream port.
+    """
+    try:
+        client = _docker_sdk.from_env()
+        raw = client.containers.list(
+            filters={'label': f'com.docker.compose.project={project_name}'}
+        )
+        result = []
+        for c in raw:
+            ports = []
+            for container_port, bindings in (c.ports or {}).items():
+                if not bindings:
+                    continue
+                for b in bindings:
+                    try:
+                        hp = int(b.get('HostPort', 0))
+                    except (ValueError, TypeError):
+                        continue
+                    if hp:
+                        ports.append({
+                            'container_port': container_port,
+                            'host_port': hp,
+                        })
+            result.append({
+                'id': c.short_id,
+                'name': c.name,
+                'service': c.labels.get('com.docker.compose.service', c.name),
+                'image': c.image.tags[0] if c.image.tags else c.image.short_id,
+                'status': c.status,
+                'ports': ports,
+            })
+        return result
+    except Exception:
+        return []
 
 
 def get_logs(app_id: int, lines: int = 200) -> str:

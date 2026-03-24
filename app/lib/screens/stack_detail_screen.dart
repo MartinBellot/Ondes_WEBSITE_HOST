@@ -965,6 +965,14 @@ class _DomainSslTabState extends State<_DomainSslTab> {
         stackId: widget.stackId,
         onCreated: (vhost) {
           setState(() => _vhosts = [vhost, ..._vhosts]);
+          final warning = vhost['warning'] as String?;
+          if (warning != null && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(warning),
+              backgroundColor: AppColors.accentYellow,
+              duration: const Duration(seconds: 6),
+            ));
+          }
         },
       ),
     );
@@ -1387,13 +1395,24 @@ class _AddVhostDialog extends StatefulWidget {
 }
 
 class _AddVhostDialogState extends State<_AddVhostDialog> {
-  final _domainCtrl  = TextEditingController();
-  final _portCtrl    = TextEditingController();
-  final _labelCtrl   = TextEditingController(text: 'app');
-  final _emailCtrl   = TextEditingController();
-  final _api         = ApiService();
-  bool  _isSaving    = false;
+  final _domainCtrl = TextEditingController();
+  final _portCtrl   = TextEditingController();
+  final _labelCtrl  = TextEditingController(text: 'app');
+  final _emailCtrl  = TextEditingController();
+  final _api        = ApiService();
+
+  List<Map<String, dynamic>> _containers = [];
+  bool   _loadingContainers = true;
+  int?   _selectedContainerIdx;
+  bool   _manualMode = false;
+  bool   _isSaving   = false;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadContainers();
+  }
 
   @override
   void dispose() {
@@ -1404,11 +1423,42 @@ class _AddVhostDialogState extends State<_AddVhostDialog> {
     super.dispose();
   }
 
+  Future<void> _loadContainers() async {
+    try {
+      final list = await _api.getStackContainers(widget.stackId);
+      if (!mounted) return;
+      setState(() {
+        _containers        = List<Map<String, dynamic>>.from(list);
+        _loadingContainers = false;
+        if (_containers.isEmpty) _manualMode = true;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() { _loadingContainers = false; _manualMode = true; });
+    }
+  }
+
+  void _selectContainerIdx(int? idx) {
+    setState(() {
+      _selectedContainerIdx = idx;
+      if (idx == null) return;
+      final c = _containers[idx];
+      _labelCtrl.text = c['service'] as String? ?? 'app';
+      final ports = c['ports'] as List? ?? [];
+      _portCtrl.text =
+          ports.isNotEmpty ? (ports.first['host_port'] ?? '').toString() : '';
+    });
+  }
+
+  List<Map<String, dynamic>> get _selectedPorts {
+    if (_selectedContainerIdx == null) return [];
+    return List<Map<String, dynamic>>.from(
+        (_containers[_selectedContainerIdx!]['ports'] as List? ?? []));
+  }
+
   Future<void> _save() async {
     final domain = _domainCtrl.text.trim();
-    final portStr = _portCtrl.text.trim();
-    final port = int.tryParse(portStr);
-
+    final port   = int.tryParse(_portCtrl.text.trim());
     if (domain.isEmpty) {
       setState(() => _error = 'Le domaine est requis.');
       return;
@@ -1417,53 +1467,123 @@ class _AddVhostDialogState extends State<_AddVhostDialog> {
       setState(() => _error = 'Port invalide (1-65535).');
       return;
     }
-
     setState(() { _isSaving = true; _error = null; });
-
     try {
+      final selectedContainer = _selectedContainerIdx != null
+          ? _containers[_selectedContainerIdx!]
+          : null;
       final vhost = await _api.createVhost({
         'stack':          widget.stackId,
         'domain':         domain,
         'upstream_port':  port,
         'service_label':  _labelCtrl.text.trim().isEmpty ? 'app' : _labelCtrl.text.trim(),
         'ssl_email':      _emailCtrl.text.trim(),
+        'container_name': selectedContainer?['name'] ?? '',
       });
       widget.onCreated(vhost);
       if (mounted) Navigator.pop(context);
     } catch (e) {
       setState(() => _error = e.toString());
     }
-
     setState(() => _isSaving = false);
   }
 
+  // ── Build ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
+    final hasManyPorts = _selectedPorts.length > 1;
     return AlertDialog(
       backgroundColor: AppColors.surface,
-      title: const Text('Ajouter un vhost',
-          style: TextStyle(color: AppColors.textPrimary)),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _Field(ctrl: _domainCtrl, label: 'Domaine (ex: app.example.com)',
-                hint: 'Sans https://'),
-            const SizedBox(height: 10),
-            _Field(ctrl: _labelCtrl, label: 'Label service (ex: app, api, front)'),
-            const SizedBox(height: 10),
-            _Field(ctrl: _portCtrl, label: 'Port upstream (port exposé sur l\'hôte)',
-                keyboardType: TextInputType.number),
-            const SizedBox(height: 10),
-            _Field(ctrl: _emailCtrl, label: 'Email SSL (optionnel, pour Certbot)',
-                keyboardType: TextInputType.emailAddress),
-            if (_error != null) ...[
-              const SizedBox(height: 8),
-              Text(_error!,
-                  style: const TextStyle(
-                      color: AppColors.accentRed, fontSize: 12)),
+      titlePadding: const EdgeInsets.fromLTRB(20, 16, 8, 0),
+      title: Row(
+        children: [
+          const Expanded(
+            child: Text('Ajouter un vhost',
+                style: TextStyle(color: AppColors.textPrimary, fontSize: 16)),
+          ),
+          if (!_loadingContainers && _containers.isNotEmpty)
+            TextButton(
+              style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact),
+              onPressed: () => setState(() {
+                _manualMode = !_manualMode;
+                _selectedContainerIdx = null;
+              }),
+              child: Text(
+                _manualMode ? '← Container' : 'Manuel',
+                style: const TextStyle(
+                    color: AppColors.textSecondary, fontSize: 11),
+              ),
+            ),
+        ],
+      ),
+      content: SizedBox(
+        width: 340,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 4),
+              _Field(
+                ctrl: _domainCtrl,
+                label: 'Domaine (ex: app.example.com)',
+                hint: 'Sans https://',
+              ),
+              const SizedBox(height: 14),
+              // ── Container-picker / manual section ─────────────────────────
+              if (_loadingContainers)
+                const Row(children: [
+                  SizedBox(
+                    width: 14, height: 14,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: AppColors.accent),
+                  ),
+                  SizedBox(width: 8),
+                  Text('Détection des containers…',
+                      style: TextStyle(
+                          color: AppColors.textSecondary, fontSize: 12)),
+                ])
+              else if (!_manualMode) ...[
+                _buildContainerDropdown(),
+                if (hasManyPorts) ...[
+                  const SizedBox(height: 8),
+                  _buildPortDropdown(),
+                ],
+                const SizedBox(height: 8),
+                _Field(
+                  ctrl: _portCtrl,
+                  label: 'Port hôte (pré-rempli, modifiable)',
+                  keyboardType: TextInputType.number,
+                ),
+              ] else ...[
+                _Field(
+                    ctrl: _labelCtrl,
+                    label: 'Label service (ex: app, api, front)'),
+                const SizedBox(height: 10),
+                _Field(
+                  ctrl: _portCtrl,
+                  label: 'Port upstream (port exposé sur l\'hôte)',
+                  keyboardType: TextInputType.number,
+                ),
+              ],
+              const SizedBox(height: 10),
+              _Field(
+                ctrl: _emailCtrl,
+                label: 'Email SSL (optionnel, pour Certbot)',
+                keyboardType: TextInputType.emailAddress,
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 8),
+                Text(_error!,
+                    style: const TextStyle(
+                        color: AppColors.accentRed, fontSize: 12)),
+              ],
             ],
-          ],
+          ),
         ),
       ),
       actions: [
@@ -1474,12 +1594,10 @@ class _AddVhostDialogState extends State<_AddVhostDialog> {
         ),
         FilledButton(
           onPressed: _isSaving ? null : _save,
-          style: FilledButton.styleFrom(
-              backgroundColor: AppColors.accent),
+          style: FilledButton.styleFrom(backgroundColor: AppColors.accent),
           child: _isSaving
               ? const SizedBox(
-                  width: 16,
-                  height: 16,
+                  width: 16, height: 16,
                   child: CircularProgressIndicator(
                       strokeWidth: 2, color: Colors.white))
               : const Text('Créer'),
@@ -1487,6 +1605,94 @@ class _AddVhostDialogState extends State<_AddVhostDialog> {
       ],
     );
   }
+
+  Widget _buildContainerDropdown() {
+    final items = <DropdownMenuItem<int>>[
+      const DropdownMenuItem<int>(
+        value: -1,
+        child: Text('— Choisir un container —',
+            style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+      ),
+      ..._containers.asMap().entries.map((entry) {
+        final i = entry.key;
+        final c = entry.value;
+        final service  = c['service'] as String? ?? c['name'] as String? ?? '?';
+        final ports    = c['ports'] as List? ?? [];
+        final portStr  = ports.isNotEmpty
+            ? ' · port ${ports.first['host_port']}'
+            : ' (aucun port exposé)';
+        return DropdownMenuItem<int>(
+          value: i,
+          child: Row(children: [
+            const Icon(Icons.dns_outlined,
+                size: 14, color: AppColors.textSecondary),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                '$service$portStr',
+                style: const TextStyle(
+                    color: AppColors.textPrimary, fontSize: 13),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ]),
+        );
+      }),
+    ];
+    return DropdownButtonFormField<int>(
+      value: _selectedContainerIdx ?? -1,
+      items: items,
+      isExpanded: true,
+      onChanged: (v) => _selectContainerIdx(v == -1 ? null : v),
+      dropdownColor: AppColors.surface,
+      style: const TextStyle(color: AppColors.textPrimary),
+      decoration: _dropdownDecoration('Container Docker'),
+    );
+  }
+
+  Widget _buildPortDropdown() {
+    final ports = _selectedPorts;
+    final currentHostPort = int.tryParse(_portCtrl.text);
+    return DropdownButtonFormField<int>(
+      value: currentHostPort,
+      items: ports.map((p) {
+        final hp = p['host_port'] as int?;
+        final cp = p['container_port'] ?? '';
+        return DropdownMenuItem<int>(
+          value: hp,
+          child: Text(
+            'Port $hp (interne : $cp)',
+            style:
+                const TextStyle(color: AppColors.textPrimary, fontSize: 13),
+          ),
+        );
+      }).toList(),
+      isExpanded: true,
+      onChanged: (v) => setState(() => _portCtrl.text = v?.toString() ?? ''),
+      dropdownColor: AppColors.surface,
+      style: const TextStyle(color: AppColors.textPrimary),
+      decoration: _dropdownDecoration('Port exposé sur l\'hôte'),
+    );
+  }
+
+  InputDecoration _dropdownDecoration(String label) => InputDecoration(
+        labelText: label,
+        labelStyle:
+            const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+        filled: true,
+        fillColor: AppColors.background,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: AppColors.border)),
+        enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: AppColors.border)),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: AppColors.accent)),
+      );
 }
 
 class _Field extends StatelessWidget {
