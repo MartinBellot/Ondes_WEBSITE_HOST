@@ -1731,7 +1731,7 @@ class _Field extends StatelessWidget {
       );
 }
 
-// ─── SSL Activation bottom sheet ─────────────────────────────────────────────
+// ─── SSL Activation bottom sheet (with live DNS checker) ─────────────────────
 
 class _SslActivationSheet extends StatefulWidget {
   final Map<String, dynamic> vhost;
@@ -1746,7 +1746,18 @@ class _SslActivationSheet extends StatefulWidget {
 class _SslActivationSheetState extends State<_SslActivationSheet> {
   final _emailCtrl = TextEditingController();
   final _api = ApiService();
-  bool _isRunning = false;
+
+  // Stages: 'dns_check' → 'ready' → 'running' → 'done'|'error'
+  String _stage = 'dns_check';
+
+  // DNS check state
+  Map<String, dynamic>? _dnsResult;
+  bool _checkingDns = false;
+  Timer? _pollTimer;
+  int _pollCount = 0;
+  static const _maxPolls = 40; // 40 × 15s = 10 min max auto-polling
+
+  // Certbot
   String? _output;
   String? _error;
 
@@ -1754,12 +1765,54 @@ class _SslActivationSheetState extends State<_SslActivationSheet> {
   void initState() {
     super.initState();
     _emailCtrl.text = (widget.vhost['ssl_email'] as String?) ?? '';
+    final sslEnabled = widget.vhost['ssl_enabled'] as bool? ?? false;
+    if (sslEnabled) {
+      // If already has SSL, skip DNS check stage — go straight to re-run
+      _stage = 'ready';
+    } else {
+      _runDnsCheck();
+    }
   }
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
     _emailCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _runDnsCheck() async {
+    if (!mounted) return;
+    setState(() => _checkingDns = true);
+    try {
+      final result = await _api.checkVhostDns(widget.vhost['id'] as int);
+      if (!mounted) return;
+      setState(() {
+        _dnsResult = result;
+        _checkingDns = false;
+        if (result['propagated'] == true) {
+          _stage = 'ready';
+          _pollTimer?.cancel();
+        }
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _checkingDns = false);
+    }
+  }
+
+  void _startAutoPoll() {
+    _pollTimer?.cancel();
+    _pollCount = 0;
+    _pollTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
+      _pollCount++;
+      if (_pollCount > _maxPolls) {
+        _pollTimer?.cancel();
+        return;
+      }
+      await _runDnsCheck();
+      if (_stage == 'ready') _pollTimer?.cancel();
+    });
   }
 
   Future<void> _runCertbot() async {
@@ -1768,16 +1821,27 @@ class _SslActivationSheetState extends State<_SslActivationSheet> {
       setState(() => _error = 'Un email est requis pour Certbot.');
       return;
     }
-    setState(() { _isRunning = true; _error = null; _output = null; });
+    setState(() {
+      _stage = 'running';
+      _error = null;
+      _output = null;
+    });
     try {
       final updated = await _api.runCertbot(
           widget.vhost['id'] as int, email);
-      setState(() => _output = updated['certbot_output'] as String? ?? 'Succès.');
+      if (!mounted) return;
+      setState(() {
+        _output = updated['certbot_output'] as String? ?? 'Succès.';
+        _stage = 'done';
+      });
       widget.onSuccess(updated);
     } catch (e) {
-      setState(() => _error = e.toString());
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _stage = 'ready';
+      });
     }
-    setState(() => _isRunning = false);
   }
 
   @override
@@ -1787,7 +1851,7 @@ class _SslActivationSheetState extends State<_SslActivationSheet> {
 
     return DraggableScrollableSheet(
       expand: false,
-      initialChildSize: 0.75,
+      initialChildSize: 0.85,
       minChildSize: 0.5,
       builder: (_, sc) => SingleChildScrollView(
         controller: sc,
@@ -1806,219 +1870,357 @@ class _SslActivationSheetState extends State<_SslActivationSheet> {
               ),
             ),
             const SizedBox(height: 16),
-
             // Title
             Row(children: [
               const Icon(Icons.lock_outline, color: AppColors.accentGreen, size: 22),
               const SizedBox(width: 10),
-              Text(
-                sslEnabled ? 'Renouveler SSL — $domain' : 'Activer SSL — $domain',
-                style: const TextStyle(
-                    color: AppColors.textPrimary,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16),
+              Expanded(
+                child: Text(
+                  sslEnabled ? 'Renouveler SSL — $domain' : 'Activer SSL — $domain',
+                  style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16),
+                ),
               ),
             ]),
             const SizedBox(height: 20),
-
-            // ── DNS Guide ───────────────────────────────────────────────
+            // DNS check step (skip for renewals)
             if (!sslEnabled) ...[
-              const _SectionTitle('1. Vérifications DNS préalables'),
-              const SizedBox(height: 8),
-              _DnsGuideCard(domain: domain),
-              const SizedBox(height: 16),
+              _buildDnsStep(domain),
+              const SizedBox(height: 20),
             ],
-
-            // ── Email ───────────────────────────────────────────────────
-            _SectionTitle(sslEnabled ? 'Email pour Certbot' : '2. Email pour Certbot'),
-            const SizedBox(height: 8),
-            _Field(
-              ctrl: _emailCtrl,
-              label: 'Adresse email (notifications Let\'s Encrypt)',
-              keyboardType: TextInputType.emailAddress,
-            ),
-            const SizedBox(height: 20),
-
-            // ── Run button ──────────────────────────────────────────────
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: _isRunning ? null : _runCertbot,
-                icon: _isRunning
-                    ? const SizedBox(
-                        width: 16, height: 16,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.verified_user_outlined),
-                label: Text(_isRunning
-                    ? 'Certbot en cours…'
-                    : (sslEnabled ? 'Renouveler le certificat' : 'Lancer Certbot')),
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.accentGreen,
-                  padding: const EdgeInsets.symmetric(vertical: 13),
-                  textStyle: const TextStyle(fontSize: 15),
-                ),
-              ),
-            ),
-
-            // ── Result ──────────────────────────────────────────────────
-            if (_error != null) ...[
-              const SizedBox(height: 14),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppColors.accentRed.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppColors.accentRed.withValues(alpha: 0.3)),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Icon(Icons.error_outline,
-                        color: AppColors.accentRed, size: 16),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(_error!,
-                          style: const TextStyle(
-                              color: AppColors.accentRed, fontSize: 12)),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-            if (_output != null) ...[
-              const SizedBox(height: 14),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppColors.accentGreen.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                      color: AppColors.accentGreen.withValues(alpha: 0.3)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Row(children: [
-                      Icon(Icons.check_circle_outline,
-                          color: AppColors.accentGreen, size: 16),
-                      SizedBox(width: 6),
-                      Text('Certbot exécuté avec succès',
-                          style: TextStyle(
-                              color: AppColors.accentGreen,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13)),
-                    ]),
-                    const SizedBox(height: 8),
-                    SelectableText(
-                      _output!,
-                      style: const TextStyle(
-                          color: AppColors.textSecondary,
-                          fontSize: 11,
-                          fontFamily: 'monospace'),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+            // Email + Certbot step
+            _buildCertbotStep(sslEnabled),
           ],
         ),
       ),
     );
   }
-}
 
-class _DnsGuideCard extends StatelessWidget {
-  final String domain;
-  const _DnsGuideCard({required this.domain});
+  Widget _buildDnsStep(String domain) {
+    final propagated = _dnsResult?['propagated'] == true;
+    final serverIp = _dnsResult?['server_ip'] as String?;
+    final resolvedIp = _dnsResult?['resolved_ip'] as String?;
 
-  @override
-  Widget build(BuildContext context) {
+    final Color stepColor;
+    final IconData stepIcon;
+    final String stepTitle;
+
+    if (_stage == 'ready' || propagated) {
+      stepColor = AppColors.accentGreen;
+      stepIcon = Icons.check_circle;
+      stepTitle = 'DNS propagé ✓';
+    } else if (_checkingDns) {
+      stepColor = AppColors.accentYellow;
+      stepIcon = Icons.pending;
+      stepTitle = 'Vérification DNS en cours…';
+    } else {
+      stepColor = AppColors.accentYellow;
+      stepIcon = Icons.warning_amber_rounded;
+      stepTitle = 'En attente de propagation DNS';
+    }
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.background,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.accent.withValues(alpha: 0.25)),
+        color: stepColor.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: stepColor.withValues(alpha: 0.3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Let\'s Encrypt doit pouvoir joindre votre serveur sur le port 80 '
-            'pour valider votre domaine.',
-            style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+          Row(
+            children: [
+              Icon(stepIcon, size: 16, color: stepColor),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('1. $stepTitle',
+                    style: TextStyle(
+                        color: stepColor,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13)),
+              ),
+              if (_checkingDns)
+                const SizedBox(
+                  width: 14, height: 14,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.accentYellow),
+                ),
+            ],
           ),
-          const SizedBox(height: 12),
-          _DnsRow(
-            icon: Icons.dns_outlined,
-            label: 'Enregistrement A',
-            value: '$domain  →  <IP_publique_serveur>',
-          ),
-          const SizedBox(height: 6),
-          const _DnsRow(
-            icon: Icons.timer_outlined,
-            label: 'TTL recommandé',
-            value: '300 – 3600 secondes',
-          ),
-          const SizedBox(height: 6),
-          const _DnsRow(
-            icon: Icons.block_outlined,
-            label: 'Port 80',
-            value: 'Doit être ouvert (pare-feu / hébergeur)',
-          ),
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: AppColors.border),
+          if (serverIp != null || resolvedIp != null) ...[
+            const SizedBox(height: 10),
+            _DnsIpRow(
+              label: 'IP du serveur',
+              value: serverIp ?? '—',
+              ok: serverIp != null,
             ),
-            child: Row(
+            const SizedBox(height: 4),
+            _DnsIpRow(
+              label: 'IP résolue ($domain)',
+              value: resolvedIp ?? 'Non résolu',
+              ok: resolvedIp != null && resolvedIp == serverIp,
+            ),
+          ],
+          if (!propagated && !_checkingDns && _dnsResult != null) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.background,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Ajoutez cet enregistrement A dans votre zone DNS :',
+                    style: TextStyle(
+                        color: AppColors.textSecondary, fontSize: 12),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(children: [
+                    const Icon(Icons.dns_outlined,
+                        size: 12, color: AppColors.textMuted),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        '$domain   A   ${serverIp ?? '<votre IP>'}',
+                        style: const TextStyle(
+                            color: AppColors.accent,
+                            fontSize: 12,
+                            fontFamily: 'monospace'),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ]),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              OutlinedButton.icon(
+                onPressed: _checkingDns ? null : () {
+                  _pollTimer?.cancel();
+                  _runDnsCheck();
+                },
+                icon: const Icon(Icons.refresh, size: 14),
+                label: const Text('Revérifier', style: TextStyle(fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: stepColor,
+                  side: BorderSide(color: stepColor.withValues(alpha: 0.5)),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+              const SizedBox(width: 10),
+              if (!propagated)
+                OutlinedButton.icon(
+                  onPressed: () { _startAutoPoll(); setState(() {}); },
+                  icon: const Icon(Icons.autorenew, size: 14),
+                  label: Text(
+                    _pollTimer?.isActive == true
+                        ? 'Polling… ($_pollCount/$_maxPolls)'
+                        : 'Auto (toutes 15s)',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.textSecondary,
+                    side: const BorderSide(color: AppColors.border),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 5),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCertbotStep(bool isRenewal) {
+    final canRun = isRenewal || _stage == 'ready';
+    final isDone = _stage == 'done';
+    final isRunning = _stage == 'running';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionTitle(isRenewal ? 'Email pour Certbot' : '2. Email + Certbot'),
+        const SizedBox(height: 8),
+        _Field(
+          ctrl: _emailCtrl,
+          label: 'Adresse email (notifications Let\'s Encrypt)',
+          keyboardType: TextInputType.emailAddress,
+        ),
+        if (!canRun && !isRenewal) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.accentYellow.withValues(alpha: 0.07),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                  color: AppColors.accentYellow.withValues(alpha: 0.25)),
+            ),
+            child: const Row(
               children: [
-                const Icon(Icons.terminal, size: 13,
-                    color: AppColors.textSecondary),
-                const SizedBox(width: 6),
+                Icon(Icons.info_outline,
+                    size: 14, color: AppColors.accentYellow),
+                SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'dig A $domain +short',
-                    style: const TextStyle(
-                        color: AppColors.accent,
-                        fontSize: 12,
-                        fontFamily: 'monospace'),
+                    'En attente de la propagation DNS avant de lancer Certbot.',
+                    style: TextStyle(
+                        color: AppColors.accentYellow, fontSize: 12),
                   ),
                 ),
               ],
             ),
           ),
         ],
-      ),
+        const SizedBox(height: 16),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: (canRun && !isRunning && !isDone) ? _runCertbot : null,
+            icon: isRunning
+                ? const SizedBox(
+                    width: 16, height: 16,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white))
+                : isDone
+                    ? const Icon(Icons.check_circle_outline)
+                    : const Icon(Icons.verified_user_outlined),
+            label: Text(isRunning
+                ? 'Certbot en cours…'
+                : isDone
+                    ? 'SSL activé !'
+                    : (isRenewal
+                        ? 'Renouveler le certificat'
+                        : 'Lancer Certbot')),
+            style: FilledButton.styleFrom(
+              backgroundColor: isDone
+                  ? AppColors.accentGreen
+                  : canRun
+                      ? AppColors.accentGreen
+                      : AppColors.border,
+              padding: const EdgeInsets.symmetric(vertical: 13),
+              textStyle: const TextStyle(fontSize: 15),
+            ),
+          ),
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.accentRed.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                  color: AppColors.accentRed.withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.error_outline,
+                    color: AppColors.accentRed, size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(_error!,
+                      style: const TextStyle(
+                          color: AppColors.accentRed, fontSize: 12)),
+                ),
+              ],
+            ),
+          ),
+        ],
+        if (_output != null) ...[
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.accentGreen.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                  color: AppColors.accentGreen.withValues(alpha: 0.3)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(children: [
+                  Icon(Icons.check_circle_outline,
+                      color: AppColors.accentGreen, size: 16),
+                  SizedBox(width: 6),
+                  Text('Certbot exécuté avec succès',
+                      style: TextStyle(
+                          color: AppColors.accentGreen,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13)),
+                ]),
+                const SizedBox(height: 8),
+                SelectableText(
+                  _output!,
+                  style: const TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 11,
+                      fontFamily: 'monospace'),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
 
-class _DnsRow extends StatelessWidget {
-  final IconData icon;
+// ─── DNS IP row helper ────────────────────────────────────────────────────────
+
+class _DnsIpRow extends StatelessWidget {
   final String label;
   final String value;
-  const _DnsRow({required this.icon, required this.label, required this.value});
+  final bool ok;
+
+  const _DnsIpRow({required this.label, required this.value, required this.ok});
 
   @override
   Widget build(BuildContext context) => Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 14, color: AppColors.textSecondary),
+          Icon(
+            ok ? Icons.check_circle : Icons.cancel,
+            size: 12,
+            color: ok ? AppColors.accentGreen : AppColors.accentRed,
+          ),
           const SizedBox(width: 6),
-          Text('$label : ',
-              style: const TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600)),
           Expanded(
-            child: Text(value,
-                style: const TextStyle(
-                    color: AppColors.textPrimary, fontSize: 12)),
+            child: RichText(
+              text: TextSpan(
+                style: const TextStyle(fontSize: 11),
+                children: [
+                  TextSpan(
+                    text: '$label: ',
+                    style: const TextStyle(color: AppColors.textMuted),
+                  ),
+                  TextSpan(
+                    text: value,
+                    style: TextStyle(
+                      color: ok
+                          ? AppColors.accentGreen
+                          : AppColors.textSecondary,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       );

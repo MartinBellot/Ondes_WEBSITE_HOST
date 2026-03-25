@@ -367,3 +367,99 @@ def sync_cert_status(vhost) -> None:
     vhost.ssl_status = _status_map.get(info.get('status', 'none'), 'none')
     vhost.save(update_fields=['ssl_status', 'ssl_expires_at'])
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DNS propagation check
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_server_ip() -> str | None:
+    """Return the server's outbound IP address (best-effort)."""
+    import socket as _socket
+    try:
+        with _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM) as s:
+            s.settimeout(3)
+            s.connect(('8.8.8.8', 80))
+            return s.getsockname()[0]
+    except Exception:
+        return None
+
+
+def resolve_domain_dns(domain: str) -> str | None:
+    """Resolve *domain* to an IPv4 address via the system resolver."""
+    import socket as _socket
+    try:
+        return _socket.gethostbyname(domain)
+    except Exception:
+        return None
+
+
+def check_dns_propagation(domain: str) -> dict:
+    """
+    Check whether *domain* currently resolves to this server's IP.
+
+    Returns a dict:
+      {
+        "domain":      str,
+        "server_ip":   str | None,
+        "resolved_ip": str | None,
+        "propagated":  bool,
+      }
+    """
+    server_ip = get_server_ip()
+    resolved_ip = resolve_domain_dns(domain)
+    propagated = bool(server_ip and resolved_ip and resolved_ip == server_ip)
+    return {
+        'domain':      domain,
+        'server_ip':   server_ip,
+        'resolved_ip': resolved_ip,
+        'propagated':  propagated,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DNS propagation check
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_server_ip() -> str | None:
+    """Return the server's outbound IP address (best-effort)."""
+    import socket as _socket
+    try:
+        with _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM) as s:
+            s.settimeout(3)
+            s.connect(('8.8.8.8', 80))
+            return s.getsockname()[0]
+    except Exception:
+        return None
+
+
+def resolve_domain_dns(domain: str) -> str | None:
+    """Resolve *domain* to an IPv4 address via the system resolver."""
+    import socket as _socket
+    try:
+        return _socket.gethostbyname(domain)
+    except Exception:
+        return None
+
+
+def check_dns_propagation(domain: str) -> dict:
+    """
+    Check whether *domain* currently resolves to this server's IP.
+
+    Returns a dict:
+      {
+        "domain":     str,
+        "server_ip":  str | None,
+        "resolved_ip": str | None,
+        "propagated": bool,
+      }
+    """
+    server_ip = get_server_ip()
+    resolved_ip = resolve_domain_dns(domain)
+    propagated = bool(server_ip and resolved_ip and resolved_ip == server_ip)
+    return {
+        'domain':      domain,
+        'server_ip':   server_ip,
+        'resolved_ip': resolved_ip,
+        'propagated':  propagated,
+    }
+

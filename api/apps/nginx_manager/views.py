@@ -204,6 +204,33 @@ class NginxVhostCertStatusView(APIView):
         })
 
 
+class NginxVhostCheckDnsView(APIView):
+    """
+    GET /api/nginx/vhosts/{id}/check-dns/
+
+    Check whether the vhost's domain currently resolves to this server's IP.
+
+    Response:
+      {
+        "domain":      str,
+        "server_ip":   str | null,
+        "resolved_ip": str | null,
+        "propagated":  bool,
+      }
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        vhost = NginxVhost.objects.filter(
+            pk=pk, stack__user=request.user,
+        ).first()
+        if not vhost:
+            return Response({'error': 'Vhost introuvable.'}, status=status.HTTP_404_NOT_FOUND)
+
+        result = services.check_dns_propagation(vhost.domain)
+        return Response(result)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Legacy endpoints (kept for backwards compat)
 # ─────────────────────────────────────────────────────────────────────────────

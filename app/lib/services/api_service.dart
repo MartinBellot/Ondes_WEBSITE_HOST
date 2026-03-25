@@ -397,5 +397,14 @@ class ApiService {
     final res = await _dio.get('/stacks/$stackId/containers/');
     return res.data as List<dynamic>;
   }
+
+  // ── DNS propagation ───────────────────────────────────────────────────────
+
+  /// Check whether the vhost domain resolves to this server's IP.
+  /// Returns: {domain, server_ip, resolved_ip, propagated}
+  Future<Map<String, dynamic>> checkVhostDns(int vhostId) async {
+    final res = await _dio.get('/nginx/vhosts/$vhostId/check-dns/');
+    return res.data as Map<String, dynamic>;
+  }
 }
 

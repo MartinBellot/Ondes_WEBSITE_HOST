@@ -4,6 +4,7 @@ from .views import (
     NginxVhostDetailView,
     NginxVhostCertbotView,
     NginxVhostCertStatusView,
+    NginxVhostCheckDnsView,
     # Legacy
     NginxPreviewView,
     NginxConfigView,
@@ -16,6 +17,7 @@ urlpatterns = [
     path('vhosts/<int:pk>/',                NginxVhostDetailView.as_view(),     name='nginx-vhost-detail'),
     path('vhosts/<int:pk>/certbot/',        NginxVhostCertbotView.as_view(),    name='nginx-vhost-certbot'),
     path('vhosts/<int:pk>/cert-status/',    NginxVhostCertStatusView.as_view(), name='nginx-vhost-cert-status'),
+    path('vhosts/<int:pk>/check-dns/',      NginxVhostCheckDnsView.as_view(),   name='nginx-vhost-check-dns'),
     # ── Legacy ────────────────────────────────────────────────────────────
     path('preview/',   NginxPreviewView.as_view(), name='nginx-preview'),
     path('configure/', NginxConfigView.as_view(),  name='nginx-configure'),

@@ -15,6 +15,7 @@ class Sidebar extends StatelessWidget {
     _NavItem(icon: Icons.hub_outlined, label: 'GitHub'),
     _NavItem(icon: Icons.dashboard_outlined, label: 'Dashboard'),
     _NavItem(icon: Icons.inventory_2_outlined, label: 'Containers'),
+    _NavItem(icon: Icons.account_tree_outlined, label: 'Canvas'),
     _NavItem(icon: Icons.terminal_outlined, label: 'Terminal'),
   ];
 

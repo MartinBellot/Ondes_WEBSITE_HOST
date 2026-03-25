@@ -22,7 +22,9 @@ A modern, self-hosted alternative to cPanel/Plesk — manage Docker stacks, GitH
 | **Stacks** | Clone a GitHub repo, pick a compose file, set env vars and deploy — real-time streaming logs via WebSocket. nginx/certbot services in the repo's compose are automatically stripped and replaced by the platform's. |
 | **Docker Manager** | List, start, stop, restart, remove containers; live status |
 | **NGINX Manager** | Per-stack multi-domain vhost management — generate NGINX configs, reload without downtime, run Certbot on-demand, track cert expiry with auto-renewal every 12 h |
-| **Domaine & SSL** | "Domaine & SSL" tab in Stack Detail — add/remove vhosts, DNS guide, one-click SSL activation via Certbot, cert expiry countdown |
+| **Domaine & SSL** | "Domaine & SSL" tab in Stack Detail — add/remove vhosts, smart DNS propagation check, Auto-SSL Pipeline wizard (DNS check → Certbot), cert expiry countdown |
+| **DNS Propagation Checker** | Before activating SSL, the app automatically checks whether the domain's A record resolves to the server's public IP. Auto-polls every 15 s until propagated; shows server IP vs. resolved IP side by side. |
+| **Live Infrastructure Canvas** | Interactive zoomable canvas (0.3×–2.5×) showing all running Docker containers as draggable node cards, grouped by Compose project. CPU and memory bars update live every 3 s via a dedicated `ws/metrics/` WebSocket. Animated pulsing status dot and per-container resource thresholds (green < 40 %, yellow < 80 %, red ≥ 80 %). Click any node to open a side-panel with full details. |
 | **SSH Terminal** | Live WebSocket shell (Paramiko) |
 
 ---
@@ -169,6 +171,7 @@ Credentials are stored in the database via the `GitHubOAuthConfig` singleton mod
 | `DELETE` | `/api/nginx/vhosts/{id}/` | Delete vhost + reload |
 | `POST`   | `/api/nginx/vhosts/{id}/certbot/` | Run Certbot for this domain; body: `{"email": "…"}` |
 | `GET`    | `/api/nginx/vhosts/{id}/cert-status/` | Refresh cert expiry from disk |
+| `GET`    | `/api/nginx/vhosts/{id}/check-dns/` | Check DNS propagation — returns `{domain, server_ip, resolved_ip, propagated}` |
 | `POST`   | `/api/nginx/preview/` | *(legacy)* Preview raw config |
 | `POST`   | `/api/nginx/configure/` | *(legacy)* Write raw config + reload |
 | `POST`   | `/api/nginx/certbot/` | *(legacy)* Run Certbot (generic) |
@@ -178,6 +181,7 @@ Credentials are stored in the database via the `GitHubOAuthConfig` singleton mod
 |---|---|
 | `ws://…/ws/ssh/` | Live SSH terminal (send connect payload) |
 | `ws://…/ws/stacks/{id}/logs/` | Real-time deploy logs |
+| `ws://…/ws/metrics/?token=<jwt>` | Live container metrics (CPU %, mem %, status) — pushed every 3 s |
 
 ---
 

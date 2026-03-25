@@ -8,6 +8,7 @@ import '../screens/github_screen.dart';
 import '../screens/dashboard_screen.dart';
 import '../screens/docker_manager_screen.dart';
 import '../screens/terminal_screen.dart';
+import '../screens/infrastructure_canvas_screen.dart';
 import 'sidebar.dart';
 
 class MainShell extends StatefulWidget {
@@ -25,6 +26,7 @@ class _MainShellState extends State<MainShell> {
     GitHubScreen(),
     DashboardScreen(),
     DockerManagerScreen(),
+    InfrastructureCanvasScreen(),
     TerminalScreen(),
   ];
 
@@ -126,6 +128,11 @@ class _AppBottomBar extends StatelessWidget {
             icon: Icon(Icons.inventory_2_outlined),
             selectedIcon: Icon(Icons.inventory_2),
             label: 'Containers',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.account_tree_outlined),
+            selectedIcon: Icon(Icons.account_tree),
+            label: 'Canvas',
           ),
           NavigationDestination(
             icon: Icon(Icons.terminal_outlined),
