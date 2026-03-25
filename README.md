@@ -29,9 +29,58 @@ A modern, self-hosted alternative to cPanel/Plesk — manage Docker stacks, GitH
 
 ---
 
-## Quick Start
+## VPS Deployment — Single Line
 
-### 1. Configure environment
+> **Tested on:** Ubuntu 20.04 / 22.04 / 24.04 · Debian 11/12 · CentOS/RHEL/Rocky/AlmaLinux 8+ · Fedora 37+  
+> **Requirements:** root access (or sudo), 1 GB RAM, 5 GB free disk, ports 80 & 443 available.
+
+```bash
+sudo bash deploy.sh
+```
+
+### What the script does, step by step
+
+| Step | Action |
+|---|---|
+| 1 | **Privilege check** — aborts immediately if not run as root |
+| 2 | **OS detection** — auto-selects `apt-get` / `dnf` for Ubuntu, Debian, CentOS, RHEL, Rocky, AlmaLinux, Fedora |
+| 3 | **Resource sanity** — warns if < 1 GB RAM or < 5 GB free disk |
+| 4 | **Port audit** — detects anything already bound to 80, 443, 3000, 8000, 5432, 6379 |
+| 5 | **System NGINX removal** — detects binary + installed packages; stops, disables, and purges system NGINX (which would conflict with the Dockerised reverse-proxy on ports 80/443); also stops Apache / Lighttpd / Caddy if detected |
+| 6 | **System dependencies** — installs `curl`, `git`, `openssl`, `ca-certificates`, `gnupg` |
+| 7 | **Docker Engine** — skips if already installed; otherwise runs the official `get.docker.com` bootstrap, then `systemctl enable --now docker` |
+| 8 | **Docker Compose v2** — installs the `docker-compose-plugin` via the distro package manager or downloads the standalone binary; validates with `docker compose version` |
+| 9 | **Project directory** — uses the current folder if a `docker-compose.yml` is present; otherwise clones the repo into `/opt/ondes-host` (override with `ONDES_DIR`) |
+| 10 | **`.env` security validation** (interactive) |
+| | — creates `.env` from `.env.example` if missing |
+| | — **SECRET_KEY**: auto-generates 100-char hex key if default/empty |
+| | — **DEBUG**: prompts to set `False` if still `True` |
+| | — **POSTGRES_PASSWORD**: auto-generates 48-char hex if default (`ondes_password`, `postgres`, etc.) and rebuilds `DATABASE_URL` |
+| | — **CERTBOT_EMAIL**: prompts for a real address if placeholder `admin@example.com` detected |
+| | — **ALLOWED_HOSTS**: prompts for your domain/IP when `*` is set in production mode |
+| | — **CORS_ALLOWED_ORIGINS**: prompts to replace `localhost` with your domain |
+| | — prints a sanitised summary (secrets truncated) before proceeding |
+| 11 | **Docker socket** — sets `chmod 660 /var/run/docker.sock` so the API container can manage user stacks |
+| 12 | **Pull base images** — `postgres`, `redis`, `nginx`, `certbot` pre-pulled for faster builds |
+| 13 | **Build images** — `docker compose build --parallel` for `api` (Django/Daphne) and `app` (Flutter web) |
+| 14 | **Launch** — `docker compose up -d --remove-orphans` |
+| 15 | **Health polling** — waits up to 180 s for the API to respond; reports per-service status |
+| 16 | **Migrations** — `python manage.py migrate --noinput` (idempotent) |
+| 17 | **Superuser** — interactive prompt to create a Django admin account |
+| 18 | **UFW firewall** (optional) — allows 22/80/443, explicitly denies 5432/6379/8000/3000 from outside |
+| 19 | **Summary** — detects public IP via `icanhazip.com`, prints service URLs and handy commands |
+
+### Environment variables (override before running)
+
+```bash
+export ONDES_REPO_URL="https://github.com/MartinBellot/ONDES_HOST.git"  # default clone target
+export ONDES_DIR="/opt/ondes-host"                                    # installation directory
+sudo -E bash deploy.sh
+```
+
+---
+
+## Quick Start
 ```bash
 cp .env.example .env
 # Edit .env — change SECRET_KEY and POSTGRES_PASSWORD at minimum
