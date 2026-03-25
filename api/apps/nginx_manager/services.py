@@ -211,14 +211,29 @@ def run_certbot_for_domain(domain: str, email: str) -> dict:
     Run certbot in a one-shot container using the webroot challenge.
     Prerequisite: an HTTP vhost must already be deployed and nginx running
     so that /.well-known/acme-challenge/ is reachable from Let's Encrypt.
+
+    Supports both named Docker volumes and bind-mount layouts.
+    In production the API container has /etc/letsencrypt bind-mounted from
+    the host, so we pass the host path directly to the certbot one-shot container.
     """
+    import os
     try:
         client = _docker_client()
+
+        # Prefer named volumes; fall back to bind-mount path (/etc/letsencrypt).
         le_vol      = _find_volume_name(client, 'letsencrypt')
         webroot_vol = _find_volume_name(client, 'certbot_webroot')
 
-        if not le_vol or not webroot_vol:
-            # Fallback for bare-metal / test environments
+        if not webroot_vol:
+            # webroot volume is always named — if absent, fall back to subprocess
+            return _run_certbot_subprocess(domain, email)
+
+        # Build the letsencrypt binding: named volume OR host bind-mount.
+        if le_vol:
+            le_binding = le_vol  # named volume
+        elif os.path.isdir('/etc/letsencrypt'):
+            le_binding = '/etc/letsencrypt'  # bind-mount exposed from host
+        else:
             return _run_certbot_subprocess(domain, email)
 
         output = client.containers.run(
@@ -231,7 +246,7 @@ def run_certbot_for_domain(domain: str, email: str) -> dict:
                 '--preferred-challenges http'
             ),
             volumes={
-                le_vol:      {'bind': '/etc/letsencrypt', 'mode': 'rw'},
+                le_binding:  {'bind': '/etc/letsencrypt', 'mode': 'rw'},
                 webroot_vol: {'bind': '/var/www/certbot',  'mode': 'rw'},
             },
             remove=True,
