@@ -21,7 +21,7 @@ Deploy GitHub/(Gitlab 🏗️) projects as Docker Stacks, manage NGINX vhosts, i
 
 ---
 
-![Ondes HOST — Infrastructure Canvas](.github/screenshots/base.png)
+<img src=".github/screenshots/base.png" alt="Ondes HOST — Infrastructure Canvas" style="border-radius: 12px;" />
 
 ---
 
