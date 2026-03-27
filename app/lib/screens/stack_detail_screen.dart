@@ -9,6 +9,7 @@ import '../services/websocket_service.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/content_header.dart';
+import '../widgets/main_shell.dart';
 
 class StackDetailScreen extends StatefulWidget {
   final int stackId;
@@ -42,6 +43,9 @@ class _StackDetailScreenState extends State<StackDetailScreen>
 
   // ── Update check ────────────────────────────────────────────────
   Map<String, dynamic>? _updateInfo;
+
+  // ── Deploy status polling ────────────────────────────────────────
+  bool _wsDeliveredStatus = false;
 
   final _api = ApiService();
   final _logsScrollCtrl = ScrollController();
@@ -107,30 +111,38 @@ class _StackDetailScreenState extends State<StackDetailScreen>
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('access_token') ?? '';
     _ws.connect('/ws/deploy/${widget.stackId}/?token=$token');
-    _wsSub = _ws.stream?.listen((raw) {
-      if (!mounted) return;
-      try {
-        final msg = jsonDecode(raw as String) as Map<String, dynamic>;
-        final type = msg['type'] as String? ?? '';
-        if (type == 'log') {
-          setState(() => _deployLogs.add(_LogEntry(
-                message: msg['message'] as String? ?? '',
-                level: msg['level'] as String? ?? 'info',
-              )));
-          _scrollLogsToBottom();
-        } else if (type == 'status') {
-          setState(() {
-            _stack = Map.from(_stack)
-              ..['status'] = msg['status']
-              ..['status_message'] = msg['message'];
-          });
-          // Also update the provider list
-          context
-              .read<StacksProvider>()
-              .refreshStack(widget.stackId);
-        }
-      } catch (_) {}
-    });
+    _wsSub = _ws.stream?.listen(
+      (raw) {
+        if (!mounted) return;
+        try {
+          final msg = jsonDecode(raw as String) as Map<String, dynamic>;
+          final type = msg['type'] as String? ?? '';
+          if (type == 'log') {
+            setState(() => _deployLogs.add(_LogEntry(
+                  message: msg['message'] as String? ?? '',
+                  level: msg['level'] as String? ?? 'info',
+                )));
+            _scrollLogsToBottom();
+          } else if (type == 'status') {
+            _wsDeliveredStatus = true;
+            setState(() {
+              _stack = Map.from(_stack)
+                ..['status'] = msg['status']
+                ..['status_message'] = msg['message'];
+            });
+            // Also update the provider list
+            context
+                .read<StacksProvider>()
+                .refreshStack(widget.stackId);
+          }
+        } catch (_) {}
+      },
+      onError: (_) {
+        // WebSocket connection error — reload stack status via REST
+        if (mounted) _loadStack();
+      },
+      cancelOnError: false,
+    );
   }
 
   void _scrollLogsToBottom() {
@@ -155,20 +167,39 @@ class _StackDetailScreenState extends State<StackDetailScreen>
     setState(() {
       _deployLogs.clear();
       _updateInfo = null; // will refresh after redeploy
+      _wsDeliveredStatus = false;
     });
     _tabController.animateTo(0); // Switch to deploy log tab
     await context.read<StacksProvider>().deployStack(widget.stackId);
+    // Fallback poll: if WS never delivers the final status (e.g. deploy
+    // finishes before WS reconnects), refresh every 4s for up to 40s.
+    for (var i = 0; i < 10 && mounted && !_wsDeliveredStatus; i++) {
+      await Future.delayed(const Duration(seconds: 4));
+      if (!mounted || _wsDeliveredStatus) break;
+      final current = _stack['status'] as String? ?? '';
+      if (!['building', 'cloning', 'starting'].contains(current)) break;
+      await _loadStack();
+    }
   }
 
   Future<void> _action(String action) async {
     await context.read<StacksProvider>().stackAction(widget.stackId, action);
     await _loadStack();
+    // Fallback poll: action runs in a background thread server-side;
+    // if WS misses the final status update, poll until the stack leaves the busy state.
+    for (var i = 0; i < 8 && mounted && !_wsDeliveredStatus; i++) {
+      await Future.delayed(const Duration(seconds: 4));
+      if (!mounted) break;
+      final current = _stack['status'] as String? ?? '';
+      if (!['building', 'cloning', 'starting', 'stopping'].contains(current)) break;
+      await _loadStack();
+    }
   }
 
   Future<void> _confirmDelete() async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogCtx) => AlertDialog(
         backgroundColor: AppColors.primarySurface,
         title: const Text('Supprimer ce stack ?',
             style: TextStyle(color: AppColors.textPrimary)),
@@ -177,12 +208,12 @@ class _StackDetailScreenState extends State<StackDetailScreen>
             style: TextStyle(color: AppColors.textSecondary)),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(dialogCtx, false),
             child: const Text('Annuler',
                 style: TextStyle(color: AppColors.textSecondary)),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(dialogCtx, true),
             style:
                 TextButton.styleFrom(foregroundColor: AppColors.accentRed),
             child: const Text('Supprimer'),
@@ -192,7 +223,10 @@ class _StackDetailScreenState extends State<StackDetailScreen>
     );
     if (ok == true && mounted) {
       await context.read<StacksProvider>().deleteStack(widget.stackId);
-      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        final nav = MainShell.contentNavKey.currentState;
+        if (nav != null && nav.canPop()) nav.pop();
+      }
     }
   }
 
@@ -364,6 +398,7 @@ class _StatusBanner extends StatelessWidget {
     'building': ('Construction…', AppColors.accentYellow),
     'cloning': ('Clonage…', AppColors.accentYellow),
     'starting': ('Démarrage…', AppColors.accentYellow),
+    'stopping': ('Arrêt en cours…', AppColors.accentYellow),
     'stopped': ('Arrêté', AppColors.textSecondary),
     'idle': ('Inactif', AppColors.textSecondary),
   };
@@ -505,7 +540,7 @@ class _ActionBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isRunning = status == 'running';
-    final isBusy = ['building', 'cloning', 'starting'].contains(status);
+    final isBusy = ['building', 'cloning', 'starting', 'stopping'].contains(status);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -1224,6 +1259,32 @@ class _DomainSslTabState extends State<_DomainSslTab> {
     } catch (_) {}
   }
 
+  Future<void> _showPortPicker(Map<String, dynamic> vhost) async {
+    final updated = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (_) => _ContainerPortSheet(
+        stackId: widget.stackId,
+        vhost: vhost,
+        api: _api,
+      ),
+    );
+    if (updated != null && mounted) {
+      setState(() {
+        final idx = _vhosts.indexWhere((v) => v['id'] == updated['id']);
+        if (idx != -1) _vhosts[idx] = updated;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Port mis à jour → ${updated['upstream_port']}'),
+        backgroundColor: AppColors.accentGreen,
+        duration: const Duration(seconds: 2),
+      ));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -1339,6 +1400,7 @@ class _DomainSslTabState extends State<_DomainSslTab> {
                     _refreshCertStatus(_vhosts[i]['id'] as int),
                 onCheckDns: () => _checkDns(
                     _vhosts[i]['id'] as int, _vhosts[i]['domain'] as String),
+                onEditPort: () => _showPortPicker(_vhosts[i]),
               ),
             ),
           ),
@@ -1619,6 +1681,7 @@ class _VhostCard extends StatelessWidget {
   final VoidCallback onActivateSsl;
   final VoidCallback onRefreshCert;
   final VoidCallback onCheckDns;
+  final VoidCallback onEditPort;
 
   const _VhostCard({
     required this.vhost,
@@ -1626,6 +1689,7 @@ class _VhostCard extends StatelessWidget {
     required this.onActivateSsl,
     required this.onRefreshCert,
     required this.onCheckDns,
+    required this.onEditPort,
   });
 
   static const _sslStatusColors = {
@@ -1709,13 +1773,28 @@ class _VhostCard extends StatelessWidget {
           // ── Row 2: port + SSL badge ────────────────────────────────────
           Row(
             children: [
-              const Icon(Icons.settings_ethernet,
-                  size: 14, color: AppColors.textSecondary),
-              const SizedBox(width: 4),
-              Text(
-                'Port : $port',
-                style: const TextStyle(
-                    color: AppColors.textSecondary, fontSize: 12),
+              InkWell(
+                onTap: onEditPort,
+                borderRadius: BorderRadius.circular(6),
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 6, top: 2, bottom: 2),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.settings_ethernet,
+                          size: 14, color: AppColors.textSecondary),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Port : $port',
+                        style: const TextStyle(
+                            color: AppColors.textSecondary, fontSize: 12),
+                      ),
+                      const SizedBox(width: 3),
+                      const Icon(Icons.edit_outlined,
+                          size: 11, color: AppColors.textMuted),
+                    ],
+                  ),
+                ),
               ),
               const SizedBox(width: 16),
               Icon(
@@ -2057,6 +2136,37 @@ class _AddVhostDialogState extends State<_AddVhostDialog> {
                           color: AppColors.textSecondary, fontSize: 12)),
                 ])
               else if (!_manualMode) ...[
+                Row(
+                  children: [
+                    const Text('Container',
+                        style: TextStyle(
+                            color: AppColors.textSecondary, fontSize: 12)),
+                    const Spacer(),
+                    InkWell(
+                      onTap: () {
+                        setState(() => _loadingContainers = true);
+                        _loadContainers();
+                      },
+                      borderRadius: BorderRadius.circular(4),
+                      child: const Padding(
+                        padding: EdgeInsets.all(4),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.refresh,
+                                size: 14, color: AppColors.textSecondary),
+                            SizedBox(width: 3),
+                            Text('Rafraîchir',
+                                style: TextStyle(
+                                    color: AppColors.textSecondary,
+                                    fontSize: 11)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
                 _buildContainerDropdown(),
                 if (hasManyPorts) ...[
                   const SizedBox(height: 8),
@@ -2780,7 +2890,7 @@ class _WebhookTab extends StatelessWidget {
       children: [
         // ── Header ─────────────────────────────────────────────────────
         const Row(
-          children: const [
+          children: [
             Icon(Icons.webhook_outlined, color: AppColors.accent, size: 20),
             SizedBox(width: 8),
             Text(
@@ -2815,7 +2925,7 @@ class _WebhookTab extends StatelessWidget {
           isSecret: true,
         ),
         const SizedBox(height: 12),
-        _SecretRow(
+        const _SecretRow(
           name: 'ONDES_API_URL',
           value: 'https://votre-serveur.com',
           hint: 'URL racine de votre instance Ondes HOST',
@@ -3018,6 +3128,297 @@ class _SecretRowState extends State<_SecretRow> {
           ],
         ],
       ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Bottom‑sheet : choisir le container/port d'un vhost en temps réel
+// ──────────────────────────────────────────────────────────────────────────────
+
+class _ContainerPortSheet extends StatefulWidget {
+  final int stackId;
+  final Map<String, dynamic> vhost;
+  final ApiService api;
+
+  const _ContainerPortSheet({
+    required this.stackId,
+    required this.vhost,
+    required this.api,
+  });
+
+  @override
+  State<_ContainerPortSheet> createState() => _ContainerPortSheetState();
+}
+
+class _ContainerPortSheetState extends State<_ContainerPortSheet> {
+  List<Map<String, dynamic>> _containers = [];
+  bool _loading = true;
+  String? _error;
+  String? _selectedId; // "containerName:port"
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final list = await widget.api.getStackContainers(widget.stackId);
+      if (!mounted) return;
+      setState(() {
+        _containers = List<Map<String, dynamic>>.from(list);
+        _loading = false;
+        final currentPort = widget.vhost['upstream_port']?.toString();
+        final currentName = widget.vhost['container_name']?.toString();
+        for (final c in _containers) {
+          final ports = (c['ports'] as List?)
+              ?.map((p) => (p as Map<String, dynamic>)['host_port']?.toString() ?? '')
+              .where((s) => s.isNotEmpty)
+              .toList() ?? <String>[];
+          for (final p in ports) {
+            if (p == currentPort && c['name'] == currentName) {
+              _selectedId = '${c['name']}:$p';
+              break;
+            }
+          }
+          if (_selectedId != null) break;
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e.toString();
+      });
+    }
+  }
+
+  Future<void> _selectPort(String containerName, String port, String serviceLabel) async {
+    final vhostId = widget.vhost['id'] as int;
+    try {
+      final updated = await widget.api.updateVhost(vhostId, {
+        'upstream_port': int.tryParse(port) ?? port,
+        'container_name': containerName,
+        'service_label': serviceLabel,
+      });
+      if (mounted) Navigator.of(context).pop(updated);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Erreur : $e'),
+        backgroundColor: Colors.red,
+      ));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.55,
+      maxChildSize: 0.9,
+      minChildSize: 0.3,
+      builder: (_, sc) => Column(
+        children: [
+          // Handle
+          Center(
+            child: Container(
+              margin: const EdgeInsets.only(top: 10, bottom: 6),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.textSecondary.withValues(alpha: 0.4),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Row(
+              children: [
+                const Icon(Icons.cable_outlined, size: 16, color: AppColors.textSecondary),
+                const SizedBox(width: 6),
+                const Text(
+                  'Sélectionner container/port',
+                  style: TextStyle(
+                      color: AppColors.textPrimary,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14),
+                ),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.refresh, size: 18, color: AppColors.textSecondary),
+                  tooltip: 'Rafraîchir',
+                  onPressed: _load,
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1, color: AppColors.border),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(_error!,
+                                style: const TextStyle(color: Colors.red, fontSize: 12)),
+                            const SizedBox(height: 8),
+                            ElevatedButton.icon(
+                              onPressed: _load,
+                              icon: const Icon(Icons.refresh, size: 14),
+                              label: const Text('Réessayer'),
+                            ),
+                          ],
+                        ),
+                      )
+                    : _containers.isEmpty
+                        ? const Center(
+                            child: Text('Aucun container actif',
+                                style: TextStyle(color: AppColors.textSecondary)),
+                          )
+                        : ListView.builder(
+                            controller: sc,
+                            itemCount: _containers.length,
+                            itemBuilder: (_, i) {
+                              final c = _containers[i];
+                              final ports = (c['ports'] as List?)
+                                  ?.map((p) => (p as Map<String, dynamic>)['host_port']?.toString() ?? '')
+                                  .where((s) => s.isNotEmpty)
+                                  .toList() ?? <String>[];
+                              return _ContainerPortTile(
+                                container: c,
+                                ports: ports,
+                                selectedId: _selectedId,
+                                onSelect: (port) {
+                                  setState(() => _selectedId = '${c['name']}:$port');
+                                  _selectPort(
+                                    c['name'] as String,
+                                    port,
+                                    (c['service'] ?? c['name']) as String,
+                                  );
+                                },
+                              );
+                            },
+                          ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ContainerPortTile extends StatelessWidget {
+  final Map<String, dynamic> container;
+  final List<String> ports;
+  final String? selectedId;
+  final void Function(String port) onSelect;
+
+  const _ContainerPortTile({
+    required this.container,
+    required this.ports,
+    required this.selectedId,
+    required this.onSelect,
+  });
+
+  Color _statusColor(String? status) {
+    if (status == null) return Colors.grey;
+    final s = status.toLowerCase();
+    if (s == 'running') return AppColors.accentGreen;
+    if (s == 'exited' || s == 'dead') return Colors.red;
+    return Colors.orange;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final name = container['name'] as String? ?? '?';
+    final service = container['service'] as String? ?? name;
+    final status = container['status'] as String?;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+          child: Row(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: _statusColor(status),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  service,
+                  style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13),
+                ),
+              ),
+              Text(
+                status ?? '',
+                style: TextStyle(
+                    color: _statusColor(status), fontSize: 11),
+              ),
+            ],
+          ),
+        ),
+        if (ports.isEmpty)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(30, 0, 16, 8),
+            child: Text('Aucun port exposé',
+                style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+          )
+        else
+          ...ports.map((port) {
+            final id = '$name:$port';
+            final selected = id == selectedId;
+            return InkWell(
+              onTap: () => onSelect(port),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(30, 6, 16, 6),
+                color: selected
+                    ? AppColors.accentGreen.withValues(alpha: 0.12)
+                    : Colors.transparent,
+                child: Row(
+                  children: [
+                    Icon(
+                      selected ? Icons.radio_button_checked : Icons.radio_button_off,
+                      size: 14,
+                      color: selected ? AppColors.accentGreen : AppColors.textSecondary,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Port $port',
+                      style: TextStyle(
+                        color: selected
+                            ? AppColors.accentGreen
+                            : AppColors.textPrimary,
+                        fontWeight:
+                            selected ? FontWeight.w600 : FontWeight.normal,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
+        const Divider(height: 1, color: AppColors.border),
+      ],
     );
   }
 }

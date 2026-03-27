@@ -366,7 +366,8 @@ fi
 
 # ── .env read/write helpers ───────────────────────────────────────────────────
 env_get() {
-  grep -E "^${1}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- | sed "s/^['\"]//;s/['\"]$//"
+  # Use 'grep ... || true' so a missing key does not trigger 'set -e / pipefail'
+  grep -E "^${1}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- | sed "s/^['\"]//;s/['\"]$//" || true
 }
 env_set() {
   local key="$1" val="$2"
@@ -498,7 +499,22 @@ if [[ -z "$CURRENT_FE_URL" || "$CURRENT_FE_URL" == "http://localhost:3000" ]]; t
   fi
 fi
 
-# ── 10i. Print sanitised .env summary ────────────────────────────────────────
+# ── 10i. SERVER_PUBLIC_IP — auto-detect and persist at deploy time ───────────
+CURRENT_PUBLIC_IP=$(env_get SERVER_PUBLIC_IP || true)
+if [[ -z "$CURRENT_PUBLIC_IP" ]]; then
+  DETECTED_IP=$(curl -4 -s --connect-timeout 5 --max-time 8 https://api.ipify.org 2>/dev/null || true)
+  if [[ -n "$DETECTED_IP" && "$DETECTED_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    env_set SERVER_PUBLIC_IP "$DETECTED_IP"
+    success "SERVER_PUBLIC_IP auto-detected: $DETECTED_IP"
+  else
+    warn "Could not auto-detect public IP (no internet? firewall?). DNS check in UI may show internal IP."
+    warn "Set SERVER_PUBLIC_IP manually in .env if needed."
+  fi
+else
+  success "SERVER_PUBLIC_IP: $CURRENT_PUBLIC_IP ✓"
+fi
+
+# ── 10j. Print sanitised .env summary ────────────────────────────────────────
 echo ""
 info "Final .env summary (secrets truncated):"
 printf "  %-28s %s\n" "SECRET_KEY"           "$(env_get SECRET_KEY | cut -c1-12)… (truncated)"
@@ -526,6 +542,10 @@ if [[ -S "$DOCKER_SOCK" ]]; then
 else
   warn "$DOCKER_SOCK not found — Docker daemon may not be running."
 fi
+
+# Ensure stacks-data directory exists on the host (bind-mounted into API container)
+mkdir -p "${PROJECT_DIR}/stacks-data"
+success "Directory ${PROJECT_DIR}/stacks-data ready"
 
 # Ensure the nginx-vhosts volume directory exists on the host
 # (the Docker volume handles this automatically, but good to pre-confirm)
@@ -561,7 +581,7 @@ success "All services started in background"
 # ==============================================================================
 step "Waiting for services to become healthy"
 
-MAX_WAIT=180   # seconds
+MAX_WAIT=30    # seconds
 INTERVAL=5
 ELAPSED=0
 
@@ -606,19 +626,26 @@ step "Admin superuser"
 
 echo ""
 if [[ "$ONDES_CI" == "1" ]]; then
-  CREATE_SU="n"
-  info "[CI] Superuser creation skipped."
-  info "     Run later:  docker compose exec api python manage.py createsuperuser"
+  # In CI mode, use DJANGO_SUPERUSER_* env vars if provided, skip silently otherwise.
+  if [[ -n "${DJANGO_SUPERUSER_USERNAME:-}" && -n "${DJANGO_SUPERUSER_PASSWORD:-}" ]]; then
+    info "[CI] Creating superuser '${DJANGO_SUPERUSER_USERNAME}' non-interactively..."
+    $DC exec -T api python manage.py createsuperuser --noinput \
+      && success "Superuser '${DJANGO_SUPERUSER_USERNAME}' created" \
+      || warn "Superuser creation failed (account may already exist)"
+  else
+    info "[CI] Superuser creation skipped (DJANGO_SUPERUSER_* not set)."
+    info "     Run later:  docker compose exec api python manage.py createsuperuser"
+  fi
 else
   ask "Create a Django superuser now? (needed to access /admin) [Y/n]: "
   read -r CREATE_SU; CREATE_SU="${CREATE_SU:-Y}"
-fi
-if [[ "$CREATE_SU" =~ ^[Yy]$ ]]; then
-  $DC exec api python manage.py createsuperuser
-  success "Superuser created"
-else
-  info "Skipped — you can create one later with:"
-  info "  docker compose exec api python manage.py createsuperuser"
+  if [[ "$CREATE_SU" =~ ^[Yy]$ ]]; then
+    $DC exec api python manage.py createsuperuser
+    success "Superuser created"
+  else
+    info "Skipped — you can create one later with:"
+    info "  docker compose exec api python manage.py createsuperuser"
+  fi
 fi
 
 # ==============================================================================

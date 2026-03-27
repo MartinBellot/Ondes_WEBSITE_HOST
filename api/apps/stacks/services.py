@@ -22,6 +22,11 @@ from channels.layers import get_channel_layer
 
 from .models import ComposeApp
 
+# Persistent base directory for cloned repos.
+# Overridable via env var; defaults to /app/stacks-data which is expected
+# to be a named volume so repos survive container restarts.
+_STACKS_DATA_DIR = os.environ.get('STACKS_DATA_DIR', '/app/stacks-data')
+
 # Compose bypass — pyyaml is an explicit dependency (see requirements.txt)
 try:
     import yaml
@@ -33,6 +38,23 @@ except ImportError:
 # because the platform provides its own managed nginx + certbot.
 _BYPASS_SERVICE_NAMES = frozenset({'nginx', 'certbot', 'certbot-companion', 'letsencrypt'})
 _BYPASS_IMAGE_FRAGMENTS = ('nginx', 'certbot')
+
+_ONDES_COMPOSE_FILE = 'docker-compose.ondes.yml'
+
+
+def _resolve_compose_file(app: 'ComposeApp') -> str:
+    """Return the effective compose filename to use for docker compose commands.
+
+    After a successful deploy, ``_strip_platform_services`` may have written a
+    trimmed copy as ``docker-compose.ondes.yml``.  Subsequent stop / start /
+    restart / get_logs calls must use that file so Docker Compose targets the
+    same project state.
+    """
+    if app.project_dir:
+        ondes_path = os.path.join(app.project_dir, _ONDES_COMPOSE_FILE)
+        if os.path.isfile(ondes_path):
+            return _ONDES_COMPOSE_FILE
+    return app.compose_file
 
 # Host ports claimed by the Ondes HOST platform NGINX container.
 # A user nginx binding these ports conflicts → strip it.
@@ -214,7 +236,10 @@ def deploy_app(app_id: int):
         _broadcast(app_id, '❌ Compte GitHub non connecté.', 'error')
         return
 
-    project_dir = app.project_dir or tempfile.mkdtemp(prefix=f'ondes_{app.id}_')
+    project_dir = app.project_dir
+    if not project_dir:
+        os.makedirs(_STACKS_DATA_DIR, exist_ok=True)
+        project_dir = os.path.join(_STACKS_DATA_DIR, f'ondes_{app.id}_{app.name.lower().replace(" ", "_")[:20]}')
     app.project_dir = project_dir
     app.save(update_fields=['project_dir'])
 
@@ -332,56 +357,127 @@ def deploy_app(app_id: int):
         _broadcast(app_id, f'⚠️  Détection auto VHosts NGINX : {_e}', 'warning')
 
 
+def _stop_containers_by_project(project_name: str) -> bool:
+    """Stop all running containers of a compose project via Docker SDK (no compose file needed)."""
+    try:
+        client = _docker_sdk.from_env()
+        containers = client.containers.list(
+            filters={'label': f'com.docker.compose.project={project_name}', 'status': 'running'}
+        )
+        for c in containers:
+            c.stop(timeout=30)
+        return True
+    except Exception:
+        return False
+
+
+def _start_containers_by_project(project_name: str) -> bool:
+    """Start all stopped containers of a compose project via Docker SDK (no compose file needed)."""
+    try:
+        client = _docker_sdk.from_env()
+        containers = client.containers.list(
+            all=True,
+            filters={'label': f'com.docker.compose.project={project_name}', 'status': 'exited'}
+        )
+        for c in containers:
+            c.start()
+        return True
+    except Exception:
+        return False
+
+
 def stop_app(app_id: int):
     app = ComposeApp.objects.get(pk=app_id)
-    if not app.project_dir or not os.path.exists(app.project_dir):
-        return {'error': 'Répertoire du projet introuvable.'}
-
     project_name = f'ondes_{app.id}_{app.name.lower().replace(" ", "_")}'
-    result = subprocess.run(
-        ['docker', 'compose', '-f', app.compose_file, '-p', project_name, 'stop'],
-        cwd=app.project_dir,
-        capture_output=True, text=True,
-    )
+
+    _set_status(app, 'stopping')
+
+    if not app.project_dir or not os.path.exists(app.project_dir):
+        # project_dir missing (e.g. /tmp cleared after restart) — fall back to Docker SDK
+        if _stop_containers_by_project(project_name):
+            _set_status(app, 'stopped')
+            return {'status': 'stopped'}
+        _set_status(app, 'error', 'Répertoire du projet introuvable et aucun container actif trouvé.')
+        return {'error': 'Répertoire du projet introuvable et aucun container actif trouvé.'}
+
+    try:
+        result = subprocess.run(
+            ['docker', 'compose', '-f', _resolve_compose_file(app), '-p', project_name, 'stop'],
+            cwd=app.project_dir,
+            capture_output=True, text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        _set_status(app, 'error', 'Timeout : docker compose stop a dépassé 120 s.')
+        return {'error': 'Timeout'}
     if result.returncode == 0:
         _set_status(app, 'stopped')
         return {'status': 'stopped'}
+    _set_status(app, 'error', result.stderr[:200])
     return {'error': result.stderr}
 
 
 def start_app(app_id: int):
     app = ComposeApp.objects.get(pk=app_id)
+    project_name = f'ondes_{app.id}_{app.name.lower().replace(" ", "_")}'
+
+    _set_status(app, 'starting')
+
     if not app.project_dir or not os.path.exists(app.project_dir):
-        # Re-deploy from scratch
+        # project_dir missing — try Docker SDK first, else trigger full re-deploy
+        if _start_containers_by_project(project_name):
+            _set_status(app, 'running')
+            return {'status': 'running'}
+        # No containers exist at all — need a full re-deploy
         threading.Thread(target=deploy_app, args=(app_id,), daemon=True).start()
         return {'status': 'deploying'}
 
-    project_name = f'ondes_{app.id}_{app.name.lower().replace(" ", "_")}'
-    result = subprocess.run(
-        ['docker', 'compose', '-f', app.compose_file, '-p', project_name, 'start'],
-        cwd=app.project_dir,
-        capture_output=True, text=True,
-    )
+    try:
+        result = subprocess.run(
+            ['docker', 'compose', '-f', _resolve_compose_file(app), '-p', project_name, 'start'],
+            cwd=app.project_dir,
+            capture_output=True, text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        _set_status(app, 'error', 'Timeout : docker compose start a dépassé 120 s.')
+        return {'error': 'Timeout'}
     if result.returncode == 0:
         _set_status(app, 'running')
         return {'status': 'running'}
+    _set_status(app, 'error', result.stderr[:200])
     return {'error': result.stderr}
 
 
 def restart_app(app_id: int):
     app = ComposeApp.objects.get(pk=app_id)
-    if not app.project_dir or not os.path.exists(app.project_dir):
-        return {'error': 'Répertoire du projet introuvable.'}
-
     project_name = f'ondes_{app.id}_{app.name.lower().replace(" ", "_")}'
-    result = subprocess.run(
-        ['docker', 'compose', '-f', app.compose_file, '-p', project_name, 'restart'],
-        cwd=app.project_dir,
-        capture_output=True, text=True,
-    )
+
+    _set_status(app, 'starting')
+
+    if not app.project_dir or not os.path.exists(app.project_dir):
+        # Fall back to Docker SDK stop+start
+        _stop_containers_by_project(project_name)
+        if _start_containers_by_project(project_name):
+            _set_status(app, 'running')
+            return {'status': 'running'}
+        _set_status(app, 'error', 'Répertoire du projet introuvable et aucun container trouvé.')
+        return {'error': 'Répertoire du projet introuvable et aucun container trouvé.'}
+
+    try:
+        result = subprocess.run(
+            ['docker', 'compose', '-f', _resolve_compose_file(app), '-p', project_name, 'restart'],
+            cwd=app.project_dir,
+            capture_output=True, text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        _set_status(app, 'error', 'Timeout : docker compose restart a dépassé 120 s.')
+        return {'error': 'Timeout'}
     if result.returncode == 0:
         _set_status(app, 'running')
         return {'status': 'running'}
+    _set_status(app, 'error', result.stderr[:200])
     return {'error': result.stderr}
 
 
@@ -392,7 +488,7 @@ def remove_app(app_id: int):
 
     if app.project_dir and os.path.exists(app.project_dir):
         subprocess.run(
-            ['docker', 'compose', '-f', app.compose_file, '-p', project_name, 'down', '--volumes'],
+            ['docker', 'compose', '-f', _resolve_compose_file(app), '-p', project_name, 'down', '--volumes'],
             cwd=app.project_dir,
             capture_output=True,
         )
@@ -419,6 +515,12 @@ def get_stack_containers(project_name: str) -> list[dict]:
             for container_port, bindings in (c.ports or {}).items():
                 if not bindings:
                     continue
+                # Docker SDK returns keys like '80/tcp' — keep only the numeric part
+                cp_str = container_port.split('/')[0] if container_port else container_port
+                try:
+                    cp_int = int(cp_str)
+                except (ValueError, TypeError):
+                    cp_int = 0
                 for b in bindings:
                     try:
                         hp = int(b.get('HostPort', 0))
@@ -426,7 +528,7 @@ def get_stack_containers(project_name: str) -> list[dict]:
                         continue
                     if hp:
                         ports.append({
-                            'container_port': container_port,
+                            'container_port': cp_int,
                             'host_port': hp,
                         })
             result.append({
@@ -450,7 +552,7 @@ def get_logs(app_id: int, lines: int = 200) -> str:
 
     project_name = f'ondes_{app.id}_{app.name.lower().replace(" ", "_")}'
     result = subprocess.run(
-        ['docker', 'compose', '-f', app.compose_file, '-p', project_name,
+        ['docker', 'compose', '-f', _resolve_compose_file(app), '-p', project_name,
          'logs', '--tail', str(lines), '--no-color'],
         cwd=app.project_dir,
         capture_output=True, text=True,

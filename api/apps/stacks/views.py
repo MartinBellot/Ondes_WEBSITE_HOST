@@ -74,17 +74,16 @@ class ComposeAppActionView(APIView):
             return Response({'error': 'Projet introuvable'}, status=status.HTTP_404_NOT_FOUND)
 
         if action == 'start':
-            result = services.start_app(app.id)
+            threading.Thread(target=services.start_app, args=(app.id,), daemon=True).start()
+            return Response({'status': 'starting'})
         elif action == 'stop':
-            result = services.stop_app(app.id)
+            threading.Thread(target=services.stop_app, args=(app.id,), daemon=True).start()
+            return Response({'status': 'stopping'})
         elif action == 'restart':
-            result = services.restart_app(app.id)
+            threading.Thread(target=services.restart_app, args=(app.id,), daemon=True).start()
+            return Response({'status': 'starting'})
         else:
             return Response({'error': 'Action invalide'}, status=status.HTTP_400_BAD_REQUEST)
-
-        if 'error' in result:
-            return Response(result, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        return Response(result)
 
 
 class ComposeAppLogsView(APIView):
@@ -281,8 +280,25 @@ class ComposeAppDetectNginxView(APIView):
         parsed_files = scan_project_nginx_configs(project_dir)
         containers = services.get_stack_containers(project_name)
 
-        existing_domains = set(NginxVhost.objects.filter(stack=app).values_list('domain', flat=True))
-        suggestions = build_vhost_suggestions(parsed_files, containers, existing_domains)
+        # Detect a gateway nginx (non-platform port) — same logic as auto_detect_and_create_vhosts
+        _PLATFORM_PORTS = frozenset({80, 443})
+        gateway_port: int | None = None
+        for _c in containers:
+            if 'nginx' not in (_c.get('service') or '').lower():
+                continue
+            for _p in (_c.get('ports') or []):
+                try:
+                    _hp = int(_p.get('host_port', 0))
+                    if _hp and _hp not in _PLATFORM_PORTS:
+                        gateway_port = _hp
+                        break
+                except (TypeError, ValueError):
+                    pass
+            if gateway_port:
+                break
+
+        existing_info = dict(NginxVhost.objects.filter(stack=app).values_list('domain', 'id'))
+        suggestions = build_vhost_suggestions(parsed_files, containers, existing_info, gateway_port=gateway_port)
 
         return Response({
             'project_name': project_name,

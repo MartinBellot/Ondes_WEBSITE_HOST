@@ -2,13 +2,25 @@ import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Centralised HTTP client.
-/// Base URL is injected at build time via --dart-define=API_URL=…
-/// Defaults to http://localhost:8000/api for local dev.
+/// Base URL is resolved at runtime from the current page origin (production web)
+/// so the app works regardless of the server IP or domain.
+/// In local dev it falls back to http://localhost:8000/api.
+/// Override at build time with --dart-define=API_URL=https://yourdomain.com/api
 class ApiService {
-  static const _baseUrl = String.fromEnvironment(
-    'API_URL',
-    defaultValue: 'http://localhost:8000/api',
-  );
+  static const _envUrl = String.fromEnvironment('API_URL');
+
+  /// Returns the API base URL.
+  /// Priority: --dart-define → current page origin + /api → localhost fallback.
+  static String get _baseUrl {
+    if (_envUrl.isNotEmpty) return _envUrl;
+    try {
+      final origin = Uri.base.origin;
+      if (origin.isNotEmpty && !origin.contains('localhost') && !origin.contains('127.0.0.1')) {
+        return '$origin/api';
+      }
+    } catch (_) {}
+    return 'http://localhost:8000/api';
+  }
 
   late final Dio _dio;
 

@@ -155,7 +155,7 @@ class NginxVhostCertbotView(APIView):
             vhost.save(update_fields=['ssl_status', 'certbot_output'])
             return Response(
                 {'error': result['message'], 'output': result.get('output', '')},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
 
         # Certbot succeeded — update config + DB

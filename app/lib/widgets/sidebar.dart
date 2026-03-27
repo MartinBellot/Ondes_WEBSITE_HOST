@@ -1,5 +1,5 @@
-import 'dart:io' show Platform;
 import 'dart:ui';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -38,20 +38,21 @@ class Sidebar extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (Platform.isMacOS) const SizedBox(height: 28),
+              if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) const SizedBox(height: 28),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
                 child: Row(
                   children: [
-                    SizedBox(
-                      width: 36,
-                      height: 36,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Image.asset('assets/images/icon.png', fit: BoxFit.contain),
+                    Text(
+                      'ONDES',
+                      style: GoogleFonts.poppins(
+                        color: AppColors.textPrimary,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.5,
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 8),
                     Text(
                       'HOST',
                       style: GoogleFonts.poppins(

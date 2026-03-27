@@ -458,8 +458,30 @@ def sync_cert_status(vhost) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_server_ip() -> str | None:
-    """Return the server's outbound IP address (best-effort)."""
+    """Return the server's public IP address.
+
+    Priority:
+    1. SERVER_PUBLIC_IP env var (set at deploy time — most reliable in Docker)
+    2. External IP detection service (bypasses Docker NAT)
+    3. UDP routing trick (fallback; may return Docker internal IP)
+    """
+    import os as _os
     import socket as _socket
+
+    # Priority 1: explicit env var injected at deploy time
+    env_ip = _os.environ.get('SERVER_PUBLIC_IP', '').strip()
+    if env_ip:
+        return env_ip
+
+    # Priority 2: external service — works when the container has outbound internet
+    try:
+        import urllib.request as _ur
+        with _ur.urlopen('https://api.ipify.org', timeout=3) as _resp:  # noqa: S310
+            return _resp.read().decode().strip()
+    except Exception:
+        pass
+
+    # Priority 3: routing trick (may return Docker bridge IP, not public IP)
     try:
         with _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM) as s:
             s.settimeout(3)
@@ -704,7 +726,7 @@ def scan_project_nginx_configs(project_dir: str) -> list[dict]:
 def build_vhost_suggestions(
     parsed_files: list[dict],
     running_containers: list[dict],
-    existing_domains: set[str],
+    existing_info: dict[str, int],
     gateway_port: int | None = None,
 ) -> list[dict]:
     """
@@ -837,8 +859,9 @@ def build_vhost_suggestions(
                 'include_www':     include_www,
                 'ssl':             spec['ssl'],
                 'source_file':     source_file,
-                'already_exists':  domain in existing_domains,
-                'auto_create':     bool(host_port and domain not in existing_domains),
+                'already_exists':  domain in existing_info,
+                'vhost_id':        existing_info.get(domain),
+                'auto_create':     bool(host_port and domain not in existing_info),
             })
 
     return suggestions
@@ -866,7 +889,7 @@ def auto_detect_and_create_vhosts(app, project_dir: str, project_name: str) -> d
 
     existing_qs = NginxVhost.objects.filter(stack=app)
     existing_by_domain: dict[str, object] = {v.domain: v for v in existing_qs}
-    existing_domains = set(existing_by_domain.keys())
+    existing_info: dict[str, int] = {v.domain: v.id for v in existing_qs}
 
     # Detect a gateway nginx: a running nginx container with a non-platform host port
     # (i.e. not 80/443).  Such containers act as internal routers for their compose
@@ -888,7 +911,7 @@ def auto_detect_and_create_vhosts(app, project_dir: str, project_name: str) -> d
         if gateway_port:
             break
 
-    suggestions = build_vhost_suggestions(parsed_files, containers, existing_domains, gateway_port=gateway_port)
+    suggestions = build_vhost_suggestions(parsed_files, containers, existing_info, gateway_port=gateway_port)
 
     created: list[dict] = []
     updated: list[dict] = []

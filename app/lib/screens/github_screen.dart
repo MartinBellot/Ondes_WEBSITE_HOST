@@ -304,6 +304,14 @@ class _NotConnectedViewState extends State<_NotConnectedView> {
 
   Widget _buildWizard(GitHubProvider gh) {
     final callbackUrl = gh.callbackUrl ?? '';
+    // Derive homepage URL from callbackUrl: same host but port 3000 (app).
+    String homepageUrl = 'http://localhost:3000/';
+    if (callbackUrl.isNotEmpty) {
+      try {
+        final uri = Uri.parse(callbackUrl);
+        homepageUrl = Uri(scheme: uri.scheme, host: uri.host, port: 3000, path: '/').toString();
+      } catch (_) {}
+    }
 
     return Center(
       child: ConstrainedBox(
@@ -375,10 +383,10 @@ class _NotConnectedViewState extends State<_NotConnectedView> {
                     ),
                     const SizedBox(height: 12),
                     // Homepage URL
-                    const _FormFieldGuide(
+                    _FormFieldGuide(
                       label: 'Homepage URL',
                       hint: 'URL principale de l\'application (doit être une URL valide).',
-                      value: 'http://localhost:3000',
+                      value: homepageUrl,
                       copiable: true,
                     ),
                     const SizedBox(height: 12),
@@ -696,13 +704,23 @@ class _CopyableField extends StatelessWidget {
             tooltip: 'Copier',
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: value));
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                    content: Text('Copié !'),
-                    duration: Duration(seconds: 2)),
-              );
+            onPressed: () async {
+              try {
+                await Clipboard.setData(ClipboardData(text: value));
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                      content: Text('Copié !'),
+                      duration: Duration(seconds: 2)),
+                );
+              } catch (_) {
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                      content: Text('Copie automatique non disponible — copiez manuellement.'),
+                      duration: Duration(seconds: 3)),
+                );
+              }
             },
           ),
         ],

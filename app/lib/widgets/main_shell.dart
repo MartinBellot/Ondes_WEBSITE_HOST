@@ -1,5 +1,5 @@
 import 'dart:ui';
-import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../theme/app_theme.dart';
@@ -73,7 +73,7 @@ class _MainShellState extends State<MainShell> {
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.sizeOf(context).width < 700;
-    final isMacOS  = defaultTargetPlatform == TargetPlatform.macOS;
+    final isMacOS  = !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
 
     final bg = isMacOS
         ? const BoxDecoration(color: Colors.transparent)

@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'theme/app_theme.dart';
@@ -32,7 +32,7 @@ class OndesApp extends StatelessWidget {
     // On macOS the NSVisualEffectView (MainFlutterWindow.swift) provides the
     // frosted-glass window background; Flutter's scaffold must be transparent
     // so the native vibrancy shows through.
-    final isMacOS = defaultTargetPlatform == TargetPlatform.macOS;
+    final isMacOS = !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
     final theme = AppTheme().ultraDarkTheme.copyWith(
       scaffoldBackgroundColor:
           isMacOS ? Colors.transparent : AppColors.background,

@@ -1,12 +1,16 @@
 import os
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+
 from django.core.asgi import get_asgi_application
+
+# Initialise Django app registry BEFORE importing anything that touches models/signals.
+_django_app = get_asgi_application()
+
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.auth import AuthMiddlewareStack
 import apps.ssh_manager.routing
 import apps.stacks.routing
 import apps.docker_manager.routing
-
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 
 _ws_patterns = (
     apps.ssh_manager.routing.websocket_urlpatterns
@@ -15,7 +19,7 @@ _ws_patterns = (
 )
 
 application = ProtocolTypeRouter({
-    'http': get_asgi_application(),
+    'http': _django_app,
     'websocket': AuthMiddlewareStack(
         URLRouter(_ws_patterns)
     ),
