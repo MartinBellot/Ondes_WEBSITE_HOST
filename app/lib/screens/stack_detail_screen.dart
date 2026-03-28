@@ -194,6 +194,7 @@ class _StackDetailScreenState extends State<StackDetailScreen>
   }
 
   Future<void> _deploy() async {
+    final provider = context.read<StacksProvider>();
     setState(() {
       _deployLogs.clear();
       _updateInfo = null; // will refresh after redeploy
@@ -203,7 +204,7 @@ class _StackDetailScreenState extends State<StackDetailScreen>
     // Re-establish WS before triggering the deploy so log messages aren't missed.
     _wsSub?.cancel();
     await _connectWs();
-    await context.read<StacksProvider>().deployStack(widget.stackId);
+    await provider.deployStack(widget.stackId);
     // Immediately fetch fresh status so the poll loop doesn't see a stale 'running'.
     await _loadStack();
     // Fallback poll: if WS never delivers the final status (e.g. deploy
@@ -218,11 +219,12 @@ class _StackDetailScreenState extends State<StackDetailScreen>
   }
 
   Future<void> _action(String action) async {
+    final provider = context.read<StacksProvider>();
     _wsDeliveredStatus = false;
     // Re-establish WS before triggering the action so status updates arrive.
     _wsSub?.cancel();
     await _connectWs();
-    await context.read<StacksProvider>().stackAction(widget.stackId, action);
+    await provider.stackAction(widget.stackId, action);
     await _loadStack();
     // Fallback poll: action runs in a background thread server-side;
     // if WS misses the final status update, poll until the stack leaves the busy state.
@@ -1604,7 +1606,7 @@ class _NginxDetectDialogState extends State<_NginxDetectDialog> {
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
                           color: _selected[i]
-                              ? AppColors.accent.withOpacity(0.5)
+                              ? AppColors.accent.withValues(alpha: 0.5)
                               : AppColors.border,
                         ),
                       ),
@@ -2257,7 +2259,7 @@ class _AddVhostDialogState extends State<_AddVhostDialog> {
                     'Ajoute un bloc nginx www + inclut www dans le cert SSL',
                     style: TextStyle(
                         color: AppColors.textSecondary, fontSize: 11)),
-                activeColor: AppColors.accent,
+                activeThumbColor: AppColors.accent,
                 contentPadding: EdgeInsets.zero,
                 dense: true,
               ),
@@ -3645,7 +3647,7 @@ class _ConsoleTabState extends State<_ConsoleTab> {
               children: [
                 Expanded(
                   child: DropdownButtonFormField<String>(
-                    value: _selectedContainerId,
+                    initialValue: _selectedContainerId,
                     items: _containers.map((c) {
                       final id      = c['id'] as String? ?? '';
                       final service = c['service'] as String? ?? c['name'] as String? ?? id;
