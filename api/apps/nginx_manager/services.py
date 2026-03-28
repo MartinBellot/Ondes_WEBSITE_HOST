@@ -34,12 +34,24 @@ def _docker_client():
     return docker.from_env()
 
 
+# The platform nginx belongs to the 'ondes-host' compose project.
+# Filtering by project name prevents accidentally sending SIGHUP to a stack's
+# own nginx container when multiple stacks expose a service named 'nginx'.
+_PLATFORM_PROJECT = 'ondes-host'
+
+
 def _get_nginx_container():
-    """Return the running nginx container (matched by compose service label)."""
+    """Return the platform nginx container, matched by both compose service and project labels."""
     try:
         client = _docker_client()
         containers = client.containers.list(
-            filters={'label': 'com.docker.compose.service=nginx', 'status': 'running'},
+            filters={
+                'label': [
+                    'com.docker.compose.service=nginx',
+                    f'com.docker.compose.project={_PLATFORM_PROJECT}',
+                ],
+                'status': 'running',
+            },
         )
         return containers[0] if containers else None
     except Exception:

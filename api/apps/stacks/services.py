@@ -272,6 +272,9 @@ def deploy_app(app_id: int):
 
     if os.path.exists(os.path.join(project_dir, '.git')):
         _broadcast(app_id, f'📦 Mise à jour du dépôt (git pull origin {branch})...')
+        # Discard any local modifications so the pull can never be blocked
+        subprocess.run(['git', 'reset', '--hard', 'HEAD'], cwd=project_dir, capture_output=True)
+        subprocess.run(['git', 'clean', '-fd'], cwd=project_dir, capture_output=True)
         rc = _run_streaming(
             ['git', 'pull', 'origin', branch],
             cwd=project_dir,
