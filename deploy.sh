@@ -464,8 +464,9 @@ if [[ "$CURRENT_DEBUG_NOW" == "False" && ("$CURRENT_HOSTS" == "*" || -z "$CURREN
   ask "Enter your server domain(s) / public IP (comma-separated, e.g. my.domain.com,1.2.3.4): "
   read -r USER_HOSTS
   if [[ -n "$USER_HOSTS" ]]; then
-    env_set ALLOWED_HOSTS "$USER_HOSTS"
-    success "ALLOWED_HOSTS set to: $USER_HOSTS"
+    FULL_HOSTS="${USER_HOSTS},localhost,127.0.0.1,localhost:8000,127.0.0.1:8000"
+    env_set ALLOWED_HOSTS "$FULL_HOSTS"
+    success "ALLOWED_HOSTS set to: $FULL_HOSTS"
   else
     warn "ALLOWED_HOSTS left as '$CURRENT_HOSTS' — ensure this is intentional."
   fi

@@ -26,18 +26,16 @@ import json
 import os
 
 from channels.generic.websocket import AsyncWebsocketConsumer
-from channels.db import database_sync_to_async
 from rest_framework_simplejwt.tokens import AccessToken
-from django.contrib.auth.models import AnonymousUser, User
 
 
-@database_sync_to_async
-def _get_user(token_str: str):
+def _get_user_id(token_str: str):
+    """Validate a JWT access token synchronously (no DB hit) and return user_id."""
     try:
         token = AccessToken(token_str)
-        return User.objects.get(id=token['user_id'])
+        return token['user_id']
     except Exception:
-        return AnonymousUser()
+        return None
 
 
 def _get_docker_client():
@@ -132,12 +130,9 @@ class MetricsConsumer(AsyncWebsocketConsumer):
         qs = parse_qs(self.scope.get('query_string', b'').decode())
         token_str = (qs.get('token', [None]) or [None])[0]
 
-        if token_str:
-            self.user = await _get_user(token_str)
-        else:
-            self.user = self.scope.get('user', AnonymousUser())
+        user_id = _get_user_id(token_str) if token_str else None
 
-        if not self.user or not self.user.is_authenticated:
+        if not user_id:
             # accept() must come before close() to avoid a Daphne protocol deadlock
             await self.accept()
             await self.close(code=4001)
