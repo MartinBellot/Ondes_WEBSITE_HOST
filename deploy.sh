@@ -25,6 +25,11 @@ ask()     { echo -e "${YELLOW}[?]${NC}    $*"; }  # prompt prefix (cosmetic)
 #   - UFW: auto-configured with recommended rules
 ONDES_CI="${ONDES_CI:-0}"
 
+# ── Image sourcing ────────────────────────────────────────────────────────────
+# Default: pull pre-built images from GHCR (fast — no compile step on the VPS).
+# Set ONDES_BUILD=1 to force a local build from source instead.
+ONDES_BUILD="${ONDES_BUILD:-0}"
+
 banner() {
   echo -e "${BOLD}${CYAN}"
   cat << 'ONDES'
@@ -561,13 +566,25 @@ $DC pull db redis nginx certbot 2>/dev/null || true
 success "Base images pulled (or already cached)"
 
 # ==============================================================================
-#  STEP 13 — Build custom images (api + app)
+#  STEP 13 — Pull pre-built images or build from source (api + app)
 # ==============================================================================
-step "Building Docker images"
+step "Docker images (api + app)"
 
-info "Building api and app (this can take 5–15 minutes on first run)…"
-$DC build --parallel 2>&1 | sed 's/^/  /'
-success "All images built successfully"
+if [[ "$ONDES_BUILD" == "1" ]]; then
+  info "ONDES_BUILD=1 — building api and app from source (this can take 5–15 minutes)…"
+  $DC build --parallel 2>&1 | sed 's/^/  /'
+  success "All images built from source"
+else
+  info "Pulling pre-built images from GitHub Container Registry…"
+  info "(set ONDES_BUILD=1 to build from source instead)"
+  if $DC pull api app 2>&1 | sed 's/^/  /'; then
+    success "Pre-built images pulled from GHCR — no build step needed ✓"
+  else
+    warn "GHCR pull failed (private repo? network issue?) — falling back to local build…"
+    $DC build --parallel 2>&1 | sed 's/^/  /'
+    success "All images built from source"
+  fi
+fi
 
 # ==============================================================================
 #  STEP 14 — Launch all services

@@ -32,6 +32,8 @@ class ContentHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     // Dynamic padding so very small screens (mobile) get tighter spacing
     final hPad = MediaQuery.sizeOf(context).width < 700 ? 16.0 : horizontalPadding;
+    // On iOS, push content below the notch / Dynamic Island
+    final topInset = MediaQuery.of(context).padding.top;
 
     return ClipRect(
       child: BackdropFilter(
@@ -48,9 +50,9 @@ class ContentHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               SizedBox(
-                height: 52,
+                height: 52 + topInset,
                 child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: hPad),
+                  padding: EdgeInsets.only(top: topInset, left: hPad, right: hPad),
                   child: Row(
                     children: [
                       // ── Back chevron (macOS pattern) ───────────────

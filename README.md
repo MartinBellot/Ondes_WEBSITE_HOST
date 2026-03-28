@@ -13,6 +13,7 @@ Deploy GitHub/(Gitlab 🏗️) projects as Docker Stacks, manage NGINX vhosts, i
 [![Flutter](https://img.shields.io/badge/Flutter-3.43-02569B?style=flat-square&logo=flutter&logoColor=white)](https://flutter.dev/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docs.docker.com/compose/)
 [![Let's Encrypt](https://img.shields.io/badge/SSL-Let's%20Encrypt-003A70?style=flat-square&logo=letsencrypt&logoColor=white)](https://letsencrypt.org/)
+[![GHCR](https://img.shields.io/badge/GHCR-ghcr.io%2Fmartinbellot-blue?style=flat-square&logo=github)](https://github.com/MartinBellot/ONDES_HOST/pkgs/container/ondes-host-api)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 
 🌐 **[ondes.pro](https://ondes.pro)**
@@ -25,7 +26,7 @@ Deploy GitHub/(Gitlab 🏗️) projects as Docker Stacks, manage NGINX vhosts, i
 
 ---
 
-## ✨ Why Ondes HOST?
+## Why Ondes HOST?
 
 You've got a VPS. You've got GitHub repos. You want them running behind HTTPS **without** wrestling with config files at 2 AM.
 
@@ -37,6 +38,20 @@ Ondes HOST gives you:
 - 📡 **Live everything** — deploy logs, container metrics, and SSH, all over WebSocket
 - 🗺️ **Visual canvas** — see your whole infrastructure at a glance, draggable and zoomable
 - 🪝 **CI/CD webhooks** — plug into GitHub Actions for zero-touch continuous deployment
+
+---
+
+## ⚡ Install on any VPS — one command
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/MartinBellot/ONDES_HOST/main/deploy.sh | sudo bash
+```
+
+**That's it.** Paste this into any fresh VPS and walk away.
+The script installs Docker, pulls the **pre-built images from GHCR** (no build step ⚡), configures secrets, runs migrations, and brings everything up — fully automated.
+
+> Tested on: Ubuntu 20+ · Debian 11+ · CentOS/RHEL/Rocky/AlmaLinux 8+ · Fedora 37+
+> Requires: root · 1 GB RAM · 5 GB disk · ports 80 & 443 free
 
 ---
 
@@ -57,11 +72,28 @@ Ondes HOST gives you:
 ## 🚀 Deploy to VPS — One Line
 
 ```bash
-sudo bash deploy.sh
+curl -fsSL https://raw.githubusercontent.com/MartinBellot/ONDES_HOST/main/deploy.sh | sudo bash
 ```
 
 > **Tested on:** Ubuntu 20.04/22.04/24.04 · Debian 11/12 · CentOS/RHEL/Rocky/AlmaLinux 8+ · Fedora 37+
 > **Requirements:** root access, 1 GB RAM, 5 GB free disk, ports 80 & 443 free.
+
+### 🐳 Pre-built Docker images
+
+Every [GitHub Release](https://github.com/MartinBellot/ONDES_HOST/releases) automatically builds and publishes Docker images to GHCR.
+The deploy script pulls them by default — **the VPS never needs to compile anything**.
+
+| Image | Tags |
+|-------|------|
+| `ghcr.io/martinbellot/ondes-host-api` | `latest`, `v1.x.x` |
+| `ghcr.io/martinbellot/ondes-host-app` | `latest`, `v1.x.x` |
+
+To force a local build from source instead:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/MartinBellot/ONDES_HOST/main/deploy.sh \
+  | sudo ONDES_BUILD=1 bash
+```
 
 <details>
 <summary><strong>⚙️ What the script does (19 steps)</strong></summary>
@@ -80,7 +112,7 @@ sudo bash deploy.sh
 | 10 | **`.env` security validation** — auto-generates `SECRET_KEY` & `POSTGRES_PASSWORD`, warns on weak/placeholder values, prompts for your domain and Certbot email |
 | 11 | **Docker socket** — `chmod 660 /var/run/docker.sock` |
 | 12 | **Pull base images** — `postgres`, `redis`, `nginx`, `certbot` pre-pulled |
-| 13 | **Build** — `docker compose build --parallel` |
+| 13 | **Pull app images** — `docker compose pull api app` from GHCR (falls back to local build if unavailable) |
 | 14 | **Launch** — `docker compose up -d --remove-orphans` |
 | 15 | **Health polling** — waits up to 180 s for API readiness |
 | 16 | **Migrations** — `python manage.py migrate --noinput` |
@@ -92,7 +124,9 @@ sudo bash deploy.sh
 # Override defaults
 export ONDES_REPO_URL="https://github.com/YourFork/ONDES_HOST.git"
 export ONDES_DIR="/opt/ondes-host"
-sudo -E bash deploy.sh
+export ONDES_BUILD=1          # build from source instead of pulling GHCR images
+curl -fsSL https://raw.githubusercontent.com/MartinBellot/ONDES_HOST/main/deploy.sh \
+  | sudo -E bash
 ```
 
 </details>

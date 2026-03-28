@@ -211,9 +211,11 @@ class _PageHeader extends StatelessWidget {
   const _PageHeader({required this.title, this.action});
 
   @override
-  Widget build(BuildContext context) => Container(
-        height: 56,
-        padding: const EdgeInsets.symmetric(horizontal: 28),
+  Widget build(BuildContext context) {
+    final topInset = MediaQuery.of(context).padding.top;
+    return Container(
+        height: 56 + topInset,
+        padding: EdgeInsets.only(top: topInset, left: 28, right: 28),
         decoration: const BoxDecoration(
           color: GlassTokens.sidebarBg,
           border: Border(bottom: BorderSide(color: GlassTokens.cardBorder)),
@@ -234,6 +236,7 @@ class _PageHeader extends StatelessWidget {
           ],
         ),
       );
+  }
 }
 
 class _RefreshButton extends StatelessWidget {
