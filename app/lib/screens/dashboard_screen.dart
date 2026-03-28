@@ -176,12 +176,18 @@ class _ContainerRow extends StatelessWidget {
                 fontSize: 14,
                 fontWeight: FontWeight.w500,
               ),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
-          Text(
-            container['image'] ?? '—',
-            style:
-                const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              container['image'] ?? '—',
+              style: const TextStyle(
+                  color: AppColors.textSecondary, fontSize: 13),
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.end,
+            ),
           ),
           const SizedBox(width: 16),
           _ChipButton(

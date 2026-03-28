@@ -1,10 +1,12 @@
-import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
+import '../utils/server_config.dart';
 import '../widgets/glass_card.dart';
 import '../providers/auth_provider.dart';
+import 'server_setup_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -181,6 +183,14 @@ class _LoginScreenState extends State<LoginScreen> {
                                       : const Text('Sign In'),
                                 ),
                               ),
+                              // Mobile only: allow the user to change the server URL.
+                              if (!kIsWeb &&
+                                  (defaultTargetPlatform == TargetPlatform.iOS ||
+                                      defaultTargetPlatform ==
+                                          TargetPlatform.android)) ...[
+                                const SizedBox(height: 16),
+                                _ServerChip(serverUrl: ServerConfig.serverUrl),
+                              ],
                             ],
                           ),
                         ),
@@ -192,6 +202,72 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ─── Mobile: server chip with "change" affordance ─────────────────────────────
+class _ServerChip extends StatelessWidget {
+  final String? serverUrl;
+  const _ServerChip({this.serverUrl});
+
+  @override
+  Widget build(BuildContext context) {
+    final label = serverUrl != null
+        ? serverUrl!.replaceFirst(RegExp(r'^https?://'), '')
+        : '—';
+
+    return GestureDetector(
+      onTap: () async {
+        // Clear the stored URL so main.dart's Consumer routes back to setup.
+        await ServerConfig.clear();
+        if (context.mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(
+              builder: (_) => const ServerSetupScreen(),
+            ),
+            (_) => false,
+          );
+        }
+      },
+      child: Container(
+        padding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppColors.surface.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: AppColors.border.withValues(alpha: 0.4),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.dns_rounded,
+              size: 12,
+              color: AppColors.textMuted,
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                label,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: AppColors.textMuted,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            const Icon(
+              Icons.edit_rounded,
+              size: 11,
+              color: AppColors.textMuted,
+            ),
+          ],
+        ),
       ),
     );
   }

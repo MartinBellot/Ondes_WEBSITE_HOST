@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
+import '../utils/server_config.dart';
 
 class AuthProvider extends ChangeNotifier {
   final _api = ApiService();
@@ -71,6 +72,14 @@ class AuthProvider extends ChangeNotifier {
     await prefs.remove('access_token');
     await prefs.remove('refresh_token');
     _isAuthenticated = false;
+    notifyListeners();
+  }
+
+  /// Mobile-only: persists the Ondes HOST server URL and reloads the Dio base URL.
+  /// Should be called from [ServerSetupScreen] before the user reaches the login screen.
+  Future<void> configureServerUrl(String url) async {
+    await ServerConfig.setServerUrl(url);
+    _api.reloadBaseUrl();
     notifyListeners();
   }
 }

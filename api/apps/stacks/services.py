@@ -179,6 +179,25 @@ def _strip_platform_services(compose_path: str, app_id: int) -> tuple[str, list[
     return bypass_filename, removed
 
 
+def _flush_deploy_group(app_id: int):
+    """Delete stale channels from the Redis deploy group before a new deploy.
+
+    Zombie channels accumulate when Daphne kills WebSocket connections without
+    running disconnect() (e.g. client tab closed mid-deploy).  Clearing the
+    group key at the very start of each deploy ensures group_send only reaches
+    live consumers, preventing 'over capacity' log spam that can saturate
+    Daphne's event loop.
+    """
+    try:
+        from django.conf import settings
+        import redis as _redis
+        redis_url = settings.CHANNEL_LAYERS['default']['CONFIG']['hosts'][0]
+        r = _redis.from_url(redis_url)
+        r.delete(f'asgi:group:deploy_{app_id}')
+    except Exception:
+        pass
+
+
 def _broadcast(app_id: int, message: str, level: str = 'info'):
     """Send a log line to the WebSocket group for this deploy."""
     try:

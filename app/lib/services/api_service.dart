@@ -1,21 +1,29 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../utils/server_config.dart';
 
 /// Centralised HTTP client.
-/// Base URL is resolved at runtime from the current page origin (production web)
-/// so the app works regardless of the server IP or domain.
-/// In local dev it falls back to http://localhost:8000/api.
-/// Override at build time with --dart-define=API_URL=https://yourdomain.com/api
+/// URL resolution priority:
+///   1. Mobile (iOS/Android): ServerConfig.serverUrl  → set by the user at first launch
+///   2. --dart-define API_URL build flag
+///   3. Current page origin + /api  (production web)
+///   4. http://localhost:8000/api   (local dev fallback)
 class ApiService {
   static const _envUrl = String.fromEnvironment('API_URL');
 
   /// Returns the API base URL.
-  /// Priority: --dart-define → current page origin + /api → localhost fallback.
   static String get _baseUrl {
+    // Mobile: use the server URL configured by the user.
+    if (!kIsWeb && ServerConfig.isConfigured) {
+      return '${ServerConfig.serverUrl}/api';
+    }
     if (_envUrl.isNotEmpty) return _envUrl;
     try {
       final origin = Uri.base.origin;
-      if (origin.isNotEmpty && !origin.contains('localhost') && !origin.contains('127.0.0.1')) {
+      if (origin.isNotEmpty &&
+          !origin.contains('localhost') &&
+          !origin.contains('127.0.0.1')) {
         return '$origin/api';
       }
     } catch (_) {}
@@ -100,6 +108,12 @@ class ApiService {
         handler.next(error);
       },
     ));
+  }
+
+  /// Refreshes the Dio base URL from [ServerConfig].
+  /// Call this after the user saves a new server URL on first mobile launch.
+  void reloadBaseUrl() {
+    _dio.options.baseUrl = _baseUrl;
   }
 
   // ── Auth ────────────────────────────────────────────────────────────────────
@@ -379,12 +393,23 @@ class ApiService {
 
   /// Run Certbot for a vhost. Body: { "email": "..." }
   /// Returns the updated vhost object (with ssl_status, ssl_expires_at, etc.).
+  /// Throws a [CertbotException] on 422 so callers can display the certbot output.
   Future<Map<String, dynamic>> runCertbot(int vhostId, String email) async {
-    final res = await _dio.post(
-      '/nginx/vhosts/$vhostId/certbot/',
-      data: {'email': email},
-    );
-    return res.data as Map<String, dynamic>;
+    try {
+      final res = await _dio.post(
+        '/nginx/vhosts/$vhostId/certbot/',
+        data: {'email': email},
+      );
+      return res.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      if (data is Map) {
+        final msg = (data['error'] as String? ?? '').trim();
+        final out = (data['output'] as String? ?? '').trim();
+        throw CertbotException(msg, out);
+      }
+      rethrow;
+    }
   }
 
   /// Refresh cert status from disk and return expiry info.
@@ -428,5 +453,15 @@ class ApiService {
     final res = await _dio.get('/stacks/$stackId/detect-nginx/');
     return res.data as Map<String, dynamic>;
   }
+}
+
+/// Thrown by [ApiService.runCertbot] when the server returns HTTP 422.
+/// [message] is the human-readable error; [output] is the raw certbot stdout/stderr.
+class CertbotException implements Exception {
+  final String message;
+  final String output;
+  const CertbotException(this.message, this.output);
+  @override
+  String toString() => message.isNotEmpty ? message : 'Certbot a échoué.';
 }
 

@@ -90,7 +90,11 @@ if REDIS_URL:
     CHANNEL_LAYERS = {
         'default': {
             'BACKEND': 'channels_redis.core.RedisChannelLayer',
-            'CONFIG': {'hosts': [REDIS_URL]},
+            'CONFIG': {
+                'hosts': [REDIS_URL],
+                'group_expiry': 3600,  # 1h — prevents zombie channel accumulation after Daphne restarts
+                'capacity': 100,
+            },
         }
     }
 else:

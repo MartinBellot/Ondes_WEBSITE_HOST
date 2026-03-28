@@ -40,6 +40,8 @@ class DeployConsumer(AsyncWebsocketConsumer):
             self.user = self.scope.get('user', AnonymousUser())
 
         if not self.user or not self.user.is_authenticated:
+            # accept() must come before close() to avoid a Daphne protocol deadlock
+            await self.accept()
             await self.close(code=4001)
             return
 

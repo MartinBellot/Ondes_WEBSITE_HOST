@@ -81,6 +81,7 @@ class _InfrastructureCanvasScreenState
   // Metrics data from WS
   List<_ContainerNode> _containers = [];
   bool _wsConnected = false;
+  bool _reconnectScheduled = false;
 
   // Selected node for side panel
   _ContainerNode? _selectedNode;
@@ -120,31 +121,56 @@ class _InfrastructureCanvasScreenState
   }
 
   Future<void> _connectMetrics() async {
+    if (!mounted) return;
+    await _wsSub?.cancel(); // cancel ghost subscription before reconnecting
+    _wsSub = null;
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     final token = prefs.getString('access_token') ?? '';
+    _ws.disconnect();
     _ws.connect('/ws/metrics/?token=$token');
-    _wsSub = _ws.stream?.listen((raw) {
-      if (!mounted) return;
-      try {
-        final msg = jsonDecode(raw as String) as Map<String, dynamic>;
-        if (msg['type'] == 'metrics') {
-          final list = (msg['containers'] as List? ?? [])
-              .cast<Map<String, dynamic>>()
-              .map(_ContainerNode.fromJson)
-              .toList();
-          setState(() {
-            _wsConnected = true;
-            _containers = list;
-            // Update selected node live
-            if (_selectedNode != null) {
-              final updated = list
-                  .where((c) => c.id == _selectedNode!.id)
-                  .firstOrNull;
-              if (updated != null) _selectedNode = updated;
-            }
-          });
-        }
-      } catch (_) {}
+    _wsSub = _ws.stream?.listen(
+      (raw) {
+        if (!mounted) return;
+        try {
+          final msg = jsonDecode(raw as String) as Map<String, dynamic>;
+          if (msg['type'] == 'metrics') {
+            final list = (msg['containers'] as List? ?? [])
+                .cast<Map<String, dynamic>>()
+                .map(_ContainerNode.fromJson)
+                .toList();
+            setState(() {
+              _wsConnected = true;
+              _containers = list;
+              // Update selected node live
+              if (_selectedNode != null) {
+                final updated = list
+                    .where((c) => c.id == _selectedNode!.id)
+                    .firstOrNull;
+                if (updated != null) _selectedNode = updated;
+              }
+            });
+          }
+        } catch (_) {}
+      },
+      onError: (_) {
+        if (mounted) setState(() => _wsConnected = false);
+        _scheduleReconnect();
+      },
+      onDone: () {
+        if (mounted) setState(() => _wsConnected = false);
+        _scheduleReconnect();
+      },
+      cancelOnError: false,
+    );
+  }
+
+  void _scheduleReconnect() {
+    if (!mounted || _reconnectScheduled) return;
+    _reconnectScheduled = true;
+    Future.delayed(const Duration(seconds: 3), () {
+      _reconnectScheduled = false;
+      if (mounted) _connectMetrics();
     });
   }
 

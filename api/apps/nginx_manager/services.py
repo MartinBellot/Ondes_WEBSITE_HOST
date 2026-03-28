@@ -311,7 +311,7 @@ def run_certbot_for_domain(domain: str, email: str, include_www: bool = False) -
                 f'certonly --webroot -w /var/www/certbot '
                 f'{domains_flag} '
                 f'--email {email} '
-                '--agree-tos --non-interactive --keep-until-expiring '
+                '--agree-tos --non-interactive --keep-until-expiring --expand '
                 '--preferred-challenges http'
             ),
             volumes={
@@ -342,7 +342,7 @@ def _run_certbot_subprocess(domain: str, email: str, include_www: bool = False) 
                 '-d', domain,
                 *(['-d', f'www.{domain}'] if include_www else []),
                 '--email', email,
-                '--agree-tos', '--non-interactive', '--keep-until-expiring',
+                '--agree-tos', '--non-interactive', '--keep-until-expiring', '--expand',
             ],
             capture_output=True, text=True, timeout=120,
         )

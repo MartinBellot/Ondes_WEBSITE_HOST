@@ -46,6 +46,7 @@ class _StackDetailScreenState extends State<StackDetailScreen>
 
   // ── Deploy status polling ────────────────────────────────────────
   bool _wsDeliveredStatus = false;
+  bool _wsReconnectScheduled = false;
 
   final _api = ApiService();
   final _logsScrollCtrl = ScrollController();
@@ -108,8 +109,14 @@ class _StackDetailScreenState extends State<StackDetailScreen>
   }
 
   Future<void> _connectWs() async {
+    // Cancel the old subscription BEFORE disconnect to prevent its onDone
+    // from triggering _scheduleWsReconnect() and creating an infinite loop.
+    await _wsSub?.cancel();
+    _wsSub = null;
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     final token = prefs.getString('access_token') ?? '';
+    _ws.disconnect();
     _ws.connect('/ws/deploy/${widget.stackId}/?token=$token');
     _wsSub = _ws.stream?.listen(
       (raw) {
@@ -140,9 +147,31 @@ class _StackDetailScreenState extends State<StackDetailScreen>
       onError: (_) {
         // WebSocket connection error — reload stack status via REST
         if (mounted) _loadStack();
+        _scheduleWsReconnect();
+      },
+      onDone: () {
+        _scheduleWsReconnect();
       },
       cancelOnError: false,
     );
+  }
+
+  void _scheduleWsReconnect() {
+    if (!mounted || _wsReconnectScheduled) return;
+    // Only keep the WS alive while the stack is actively doing something.
+    // When idle/running/stopped there is nothing to stream, so let the connection
+    // stay closed to avoid spurious setState() calls every ~10 s.
+    final current = _stack['status'] as String? ?? '';
+    const busyStates = {'building', 'cloning', 'starting', 'stopping', 'deploying'};
+    if (!busyStates.contains(current)) return;
+
+    _wsReconnectScheduled = true;
+    Future.delayed(const Duration(seconds: 3), () {
+      _wsReconnectScheduled = false;
+      if (!mounted) return;
+      _wsSub?.cancel();
+      _connectWs();
+    });
   }
 
   void _scrollLogsToBottom() {
@@ -170,19 +199,28 @@ class _StackDetailScreenState extends State<StackDetailScreen>
       _wsDeliveredStatus = false;
     });
     _tabController.animateTo(0); // Switch to deploy log tab
+    // Re-establish WS before triggering the deploy so log messages aren't missed.
+    _wsSub?.cancel();
+    await _connectWs();
     await context.read<StacksProvider>().deployStack(widget.stackId);
+    // Immediately fetch fresh status so the poll loop doesn't see a stale 'running'.
+    await _loadStack();
     // Fallback poll: if WS never delivers the final status (e.g. deploy
     // finishes before WS reconnects), refresh every 4s for up to 40s.
     for (var i = 0; i < 10 && mounted && !_wsDeliveredStatus; i++) {
       await Future.delayed(const Duration(seconds: 4));
       if (!mounted || _wsDeliveredStatus) break;
+      await _loadStack(); // load first, then check
       final current = _stack['status'] as String? ?? '';
       if (!['building', 'cloning', 'starting'].contains(current)) break;
-      await _loadStack();
     }
   }
 
   Future<void> _action(String action) async {
+    _wsDeliveredStatus = false;
+    // Re-establish WS before triggering the action so status updates arrive.
+    _wsSub?.cancel();
+    await _connectWs();
     await context.read<StacksProvider>().stackAction(widget.stackId, action);
     await _loadStack();
     // Fallback poll: action runs in a background thread server-side;
@@ -550,33 +588,41 @@ class _ActionBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          _ActionBtn(
-            icon: Icons.rocket_launch_outlined,
-            label: 'Redéployer',
-            color: AppColors.accent,
-            onTap: isBusy ? null : onDeploy,
+          Expanded(
+            child: _ActionBtn(
+              icon: Icons.rocket_launch_outlined,
+              label: 'Redéployer',
+              color: AppColors.accent,
+              onTap: isBusy ? null : onDeploy,
+            ),
           ),
           const SizedBox(width: 10),
           if (!isRunning)
-            _ActionBtn(
-              icon: Icons.play_arrow,
-              label: 'Démarrer',
-              color: AppColors.accentGreen,
-              onTap: isBusy ? null : onStart,
+            Expanded(
+              child: _ActionBtn(
+                icon: Icons.play_arrow,
+                label: 'Démarrer',
+                color: AppColors.accentGreen,
+                onTap: isBusy ? null : onStart,
+              ),
             ),
           if (isRunning)
-            _ActionBtn(
-              icon: Icons.stop,
-              label: 'Arrêter',
-              color: AppColors.accentRed,
-              onTap: onStop,
+            Expanded(
+              child: _ActionBtn(
+                icon: Icons.stop,
+                label: 'Arrêter',
+                color: AppColors.accentRed,
+                onTap: onStop,
+              ),
             ),
           const SizedBox(width: 10),
-          _ActionBtn(
-            icon: Icons.restart_alt,
-            label: 'Redémarrer',
-            color: AppColors.accentYellow,
-            onTap: isBusy ? null : onRestart,
+          Expanded(
+            child: _ActionBtn(
+              icon: Icons.restart_alt,
+              label: 'Redémarrer',
+              color: AppColors.accentYellow,
+              onTap: isBusy ? null : onRestart,
+            ),
           ),
         ],
       ),
@@ -2468,6 +2514,13 @@ class _SslActivationSheetState extends State<_SslActivationSheet> {
         _stage = 'done';
       });
       widget.onSuccess(updated);
+    } on CertbotException catch (e) {
+      if (!mounted) return;
+      final detail = [e.toString(), if (e.output.isNotEmpty) e.output].join('\n\n');
+      setState(() {
+        _error = detail;
+        _stage = 'ready';
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
