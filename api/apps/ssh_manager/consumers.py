@@ -1,9 +1,27 @@
 import asyncio
 import io
 import json
+import os
+import struct
+import fcntl
+import termios
+import pty
+import threading
 
 import paramiko
 from channels.generic.websocket import AsyncWebsocketConsumer
+from rest_framework_simplejwt.tokens import AccessToken
+from rest_framework_simplejwt.exceptions import TokenError
+import docker
+
+
+def _authenticate_token(token_str: str):
+    """Validate a JWT access token and return the user, or raise TokenError."""
+    token = AccessToken(token_str)
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    return User.objects.get(pk=token['user_id'])
+
 
 
 class SSHConsumer(AsyncWebsocketConsumer):
@@ -135,3 +153,150 @@ class SSHConsumer(AsyncWebsocketConsumer):
 
     async def _send_error(self, message: str):
         await self.send(json.dumps({'type': 'error', 'message': message}))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Docker exec consumer — interactive shell inside a running container
+# ─────────────────────────────────────────────────────────────────────────────
+
+class DockerExecConsumer(AsyncWebsocketConsumer):
+    """
+    Opens an interactive PTY shell inside a Docker container via docker-py's
+    exec_run API and streams I/O to the Flutter client.
+
+    URL: ws/exec/<container_id>/?token=ACCESS_TOKEN
+
+    Protocol (JSON):
+      Client → Server:
+        { "type": "input",  "data": "<text>" }
+        { "type": "resize", "cols": 220, "rows": 50 }
+      Server → Client:
+        { "type": "connected", "message": "..." }
+        { "type": "output",    "data": "..." }
+        { "type": "error",     "message": "..." }
+    """
+
+    async def connect(self):
+        # ── JWT auth from query string ────────────────────────────────────────
+        qs = self.scope.get('query_string', b'').decode()
+        token_str = ''
+        for part in qs.split('&'):
+            if part.startswith('token='):
+                token_str = part[6:]
+                break
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, lambda: _authenticate_token(token_str))
+        except Exception:
+            await self.close(code=4001)
+            return
+
+        self._container_id = self.scope['url_route']['kwargs']['container_id']
+        self._exec_socket = None
+        self._reading = False
+        await self.accept()
+        await self._start_exec()
+
+    async def disconnect(self, close_code):
+        self._reading = False
+        if self._exec_socket:
+            try:
+                self._exec_socket.close()
+            except Exception:
+                pass
+
+    async def receive(self, text_data):
+        try:
+            data = json.loads(text_data)
+        except json.JSONDecodeError:
+            return
+        msg_type = data.get('type')
+        if msg_type == 'input':
+            await self._send_input(data.get('data', ''))
+        elif msg_type == 'resize':
+            await self._resize(int(data.get('cols', 220)), int(data.get('rows', 50)))
+
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def _start_exec(self):
+        loop = asyncio.get_event_loop()
+        try:
+            def _open():
+                client = docker.from_env()
+                container = client.containers.get(self._container_id)
+                # Probe for a shell — prefer bash, fall back to sh
+                shells = ['/bin/bash', '/bin/sh']
+                shell = '/bin/sh'
+                for s in shells:
+                    probe = container.exec_run(f'test -x {s}', demux=False)
+                    if probe.exit_code == 0:
+                        shell = s
+                        break
+                exec_id = client.api.exec_create(
+                    container.id,
+                    [shell],
+                    stdin=True,
+                    tty=True,
+                    stdout=True,
+                    stderr=True,
+                )
+                sock = client.api.exec_start(
+                    exec_id,
+                    detach=False,
+                    tty=True,
+                    socket=True,
+                )
+                # docker-py wraps the socket in a SocketIO on some versions;
+                # unwrap to get the real socket for makefile / settimeout.
+                raw = getattr(sock, '_sock', sock)
+                raw.settimeout(0.05)
+                return raw, container.name
+
+            self._exec_socket, cname = await loop.run_in_executor(None, _open)
+            self._reading = True
+            await self.send(json.dumps({
+                'type': 'connected',
+                'message': f'Shell ouvert dans {cname}',
+            }))
+            asyncio.ensure_future(self._read_loop())
+        except Exception as exc:
+            await self.send(json.dumps({'type': 'error', 'message': str(exc)}))
+            await self.close()
+
+    async def _read_loop(self):
+        import socket as _socket
+        loop = asyncio.get_event_loop()
+        while self._reading and self._exec_socket:
+            try:
+                chunk = await loop.run_in_executor(None, self._exec_socket.recv, 4096)
+                if not chunk:
+                    break
+                await self.send(json.dumps({
+                    'type': 'output',
+                    'data': chunk.decode('utf-8', errors='replace'),
+                }))
+            except _socket.timeout:
+                continue
+            except Exception:
+                break
+        self._reading = False
+        if self.channel_layer:
+            pass  # no group to leave
+        await self.send(json.dumps({'type': 'output', 'data': '\r\nSession terminée.\r\n'}))
+
+    async def _send_input(self, data: str):
+        if self._exec_socket:
+            loop = asyncio.get_event_loop()
+            try:
+                await loop.run_in_executor(
+                    None, lambda: self._exec_socket.send(data.encode('utf-8', errors='replace'))
+                )
+            except Exception:
+                pass
+
+    async def _resize(self, cols: int, rows: int):
+        # PTY resize via docker-py low-level API is not straightforward;
+        # the exec socket is a raw socket. We skip resize for now — the
+        # terminal still works, just at fixed 220×50.
+        pass
+

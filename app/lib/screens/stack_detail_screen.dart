@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/stacks_provider.dart';
@@ -54,7 +55,7 @@ class _StackDetailScreenState extends State<StackDetailScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(length: 6, vsync: this);
     _tabController.addListener(() {
       if (_tabController.index == 2 && _staticLogs.isEmpty) {
         _loadStaticLogs();
@@ -356,6 +357,7 @@ class _StackDetailScreenState extends State<StackDetailScreen>
                 Tab(text: 'Logs'),
                 Tab(text: 'Domaine & SSL'),
                 Tab(text: 'CI/CD'),
+                Tab(text: 'Console'),
               ],
             ),
           ),
@@ -413,6 +415,8 @@ class _StackDetailScreenState extends State<StackDetailScreen>
                 _DomainSslTab(stackId: widget.stackId),
                 // CI/CD webhook
                 _WebhookTab(stack: _stack),
+                // Docker exec console
+                _ConsoleTab(stackId: widget.stackId),
               ],
             ),
           ),
@@ -1129,7 +1133,7 @@ class _DomainSslTabState extends State<_DomainSslTab> {
   Future<void> _deleteVhost(int id, String domain) async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogCtx) => AlertDialog(
         backgroundColor: AppColors.surface,
         title: Text('Supprimer $domain ?',
             style: const TextStyle(color: AppColors.textPrimary)),
@@ -1139,12 +1143,12 @@ class _DomainSslTabState extends State<_DomainSslTab> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(dialogCtx, false),
             child: const Text('Annuler',
                 style: TextStyle(color: AppColors.textSecondary)),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(dialogCtx, true),
             style: TextButton.styleFrom(foregroundColor: AppColors.accentRed),
             child: const Text('Supprimer'),
           ),
@@ -3476,3 +3480,306 @@ class _ContainerPortTile extends StatelessWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Console tab — interactive docker exec shell
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ConsoleTab extends StatefulWidget {
+  final int stackId;
+  const _ConsoleTab({required this.stackId});
+
+  @override
+  State<_ConsoleTab> createState() => _ConsoleTabState();
+}
+
+class _ConsoleTabState extends State<_ConsoleTab> {
+  final _api        = ApiService();
+  final _ws         = WebSocketService();
+  final _inputCtrl  = TextEditingController();
+  final _scrollCtrl = ScrollController();
+
+  List<Map<String, dynamic>> _containers = [];
+  bool   _loadingContainers = true;
+  String? _selectedContainerId;
+  bool   _connected  = false;
+  bool   _connecting = false;
+  final List<String> _lines = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadContainers();
+  }
+
+  @override
+  void dispose() {
+    _ws.disconnect();
+    _inputCtrl.dispose();
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadContainers() async {
+    setState(() => _loadingContainers = true);
+    try {
+      final list = await _api.getStackContainers(widget.stackId);
+      if (!mounted) return;
+      setState(() {
+        _containers        = List<Map<String, dynamic>>.from(list);
+        _loadingContainers = false;
+        if (_containers.isNotEmpty && _selectedContainerId == null) {
+          _selectedContainerId = _containers.first['id'] as String?;
+        }
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingContainers = false);
+    }
+  }
+
+  void _connect() {
+    if (_selectedContainerId == null) return;
+    setState(() { _connecting = true; _lines.clear(); });
+    try {
+      _ws.connect('/ws/exec/$_selectedContainerId/');
+      _ws.stream?.listen(
+        (event) {
+          if (!mounted) return;
+          final data = jsonDecode(event as String) as Map<String, dynamic>;
+          switch (data['type']) {
+            case 'connected':
+              setState(() { _connected = true; _connecting = false; });
+              _addOutput(data['message'] as String? ?? 'Connecté');
+            case 'output':
+              _addOutput(data['data'] as String? ?? '');
+            case 'error':
+              setState(() { _connected = false; _connecting = false; });
+              _addOutput('✗ ${data['message']}');
+          }
+        },
+        onDone: () {
+          if (mounted) setState(() => _connected = false);
+          _addOutput('\r\nSession fermée.');
+        },
+        onError: (e) {
+          if (mounted) setState(() { _connected = false; _connecting = false; });
+          _addOutput('Erreur WebSocket : $e');
+        },
+      );
+    } catch (e) {
+      setState(() => _connecting = false);
+      _addOutput('Impossible d\'ouvrir la connexion : $e');
+    }
+  }
+
+  void _disconnect() {
+    _ws.disconnect();
+    setState(() => _connected = false);
+    _addOutput('Déconnecté.');
+  }
+
+  void _sendInput() {
+    final text = _inputCtrl.text;
+    if (text.isEmpty || !_connected) return;
+    _ws.send({'type': 'input', 'data': '$text\n'});
+    _inputCtrl.clear();
+  }
+
+  void _addOutput(String text) {
+    if (!mounted) return;
+    setState(() {
+      _lines.addAll(text.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n'));
+      if (_lines.length > 2000) _lines.removeRange(0, _lines.length - 2000);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollCtrl.hasClients) {
+        _scrollCtrl.animateTo(
+          _scrollCtrl.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 80),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Toolbar ──────────────────────────────────────────────────────
+          Row(
+            children: [
+              const Icon(Icons.terminal, color: AppColors.accent, size: 18),
+              const SizedBox(width: 8),
+              const Text('Console container',
+                  style: TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600)),
+              const Spacer(),
+              if (_loadingContainers)
+                const SizedBox(
+                  width: 14, height: 14,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.accent),
+                )
+              else
+                IconButton(
+                  icon: const Icon(Icons.refresh,
+                      size: 16, color: AppColors.textSecondary),
+                  tooltip: 'Rafraîchir les containers',
+                  onPressed: _loadContainers,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          // ── Container picker + connect button ────────────────────────────
+          if (!_loadingContainers)
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: _selectedContainerId,
+                    items: _containers.map((c) {
+                      final id      = c['id'] as String? ?? '';
+                      final service = c['service'] as String? ?? c['name'] as String? ?? id;
+                      final status  = c['status'] as String? ?? '';
+                      return DropdownMenuItem<String>(
+                        value: id,
+                        child: Row(children: [
+                          Icon(Icons.circle,
+                              size: 8,
+                              color: status == 'running'
+                                  ? AppColors.accentGreen
+                                  : AppColors.textMuted),
+                          const SizedBox(width: 6),
+                          Text(service,
+                              style: const TextStyle(
+                                  color: AppColors.textPrimary, fontSize: 13)),
+                        ]),
+                      );
+                    }).toList(),
+                    onChanged: _connected
+                        ? null
+                        : (v) {
+                            if (v == null) return;
+                            setState(() {
+                              _selectedContainerId = v;
+                            });
+                          },
+                    dropdownColor: AppColors.surface,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 8),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(6),
+                          borderSide:
+                              const BorderSide(color: AppColors.border)),
+                      enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(6),
+                          borderSide:
+                              const BorderSide(color: AppColors.border)),
+                    ),
+                    hint: const Text('Sélectionner un container',
+                        style: TextStyle(
+                            color: AppColors.textSecondary, fontSize: 13)),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                if (!_connected)
+                  FilledButton.icon(
+                    onPressed: (_connecting || _selectedContainerId == null)
+                        ? null
+                        : _connect,
+                    icon: _connecting
+                        ? const SizedBox(
+                            width: 14, height: 14,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white))
+                        : const Icon(Icons.play_arrow, size: 16),
+                    label: const Text('Connecter'),
+                    style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.accent),
+                  )
+                else
+                  OutlinedButton.icon(
+                    onPressed: _disconnect,
+                    icon: const Icon(Icons.stop, size: 16),
+                    label: const Text('Déconnecter'),
+                    style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.accentRed,
+                        side: const BorderSide(color: AppColors.accentRed)),
+                  ),
+              ],
+            ),
+          const SizedBox(height: 12),
+          // ── Terminal output ──────────────────────────────────────────────
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.border),
+              ),
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                children: [
+                  Expanded(
+                    child: ListView.builder(
+                      controller: _scrollCtrl,
+                      itemCount: _lines.length,
+                      itemBuilder: (_, i) => SelectableText(
+                        _lines[i],
+                        style: GoogleFonts.jetBrainsMono(
+                          color: const Color(0xFF22C55E),
+                          fontSize: 12,
+                          height: 1.5,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (_connected) ...[
+                    const Divider(color: AppColors.border, height: 10),
+                    Row(
+                      children: [
+                        Text('\$ ',
+                            style: GoogleFonts.jetBrainsMono(
+                                color: const Color(0xFF22C55E), fontSize: 13)),
+                        Expanded(
+                          child: TextField(
+                            controller: _inputCtrl,
+                            onSubmitted: (_) => _sendInput(),
+                            style: GoogleFonts.jetBrainsMono(
+                                color: Colors.white, fontSize: 13),
+                            decoration: const InputDecoration(
+                              border: InputBorder.none,
+                              isDense: true,
+                              filled: false,
+                            ),
+                            autofocus: true,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.send,
+                              size: 16, color: AppColors.accent),
+                          onPressed: _sendInput,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
