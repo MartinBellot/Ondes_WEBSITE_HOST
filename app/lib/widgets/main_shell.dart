@@ -1,15 +1,13 @@
-import 'dart:ui';
-import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:universal_platform/universal_platform.dart';
 import '../theme/app_theme.dart';
 import '../providers/auth_provider.dart';
 import '../providers/github_provider.dart';
 import '../providers/stacks_provider.dart';
 import '../screens/github_screen.dart';
 import '../screens/dashboard_screen.dart';
-import '../screens/docker_manager_screen.dart';
-import '../screens/terminal_screen.dart';
 import '../screens/infrastructure_canvas_screen.dart';
 import 'sidebar.dart';
 
@@ -39,9 +37,7 @@ class _MainShellState extends State<MainShell> {
   static const List<Widget> _screens = [
     GitHubScreen(),
     DashboardScreen(),
-    DockerManagerScreen(),
     InfrastructureCanvasScreen(),
-    TerminalScreen(),
   ];
 
   @override
@@ -73,7 +69,7 @@ class _MainShellState extends State<MainShell> {
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.sizeOf(context).width < 700;
-    final isMacOS  = !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
+    final isMacOS  = UniversalPlatform.isMacOS;
 
     final bg = isMacOS
         ? const BoxDecoration(color: Colors.transparent)
@@ -119,11 +115,18 @@ class _MainShellState extends State<MainShell> {
             valueListenable: _tabNotifier,
             builder: (_, idx, __) => Scaffold(
               backgroundColor: Colors.transparent,
-              body: contentNavigator,
-              bottomNavigationBar: _GlassBottomBar(
-                index: idx,
-                onTap: _navigate,
-                onLogout: () => context.read<AuthProvider>().logout(),
+              body: Stack(
+                children: [
+                  contentNavigator,
+                  Positioned(
+                    bottom: 0, left: 0, right: 0,
+                    child: _GlassBottomBar(
+                      index: idx,
+                      onTap: _navigate,
+                      onLogout: () => context.read<AuthProvider>().logout(),
+                    ),
+                  ),
+                ],
               ),
             ),
           )
@@ -186,6 +189,8 @@ class _AccentBlob extends StatelessWidget {
 }
 
 // ─── Glass bottom bar (mobile) ────────────────────────────────────────────────
+typedef _NavItem = ({IconData icon, IconData activeIcon, String label});
+
 class _GlassBottomBar extends StatelessWidget {
   final int index;
   final ValueChanged<int> onTap;
@@ -197,51 +202,93 @@ class _GlassBottomBar extends StatelessWidget {
     required this.onLogout,
   });
 
+  static const List<_NavItem> _items = [
+    (icon: Icons.hub_outlined,          activeIcon: Icons.hub,          label: 'GitHub'),
+    (icon: Icons.dashboard_outlined,    activeIcon: Icons.dashboard,    label: 'Dashboard'),
+    (icon: Icons.account_tree_outlined, activeIcon: Icons.account_tree, label: 'Canvas'),
+  ];
+
+  Widget _buildNavItem(BuildContext context, int itemIndex) {
+    final item = _items[itemIndex];
+    final isSelected = index == itemIndex;
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.0, end: isSelected ? 1.0 : 0.0),
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeOutCubic,
+      builder: (ctx, value, _) {
+        return GestureDetector(
+          onTap: () => onTap(itemIndex),
+          behavior: HitTestBehavior.opaque,
+          child: SizedBox(
+            width: 70,
+            height: 70,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                AnimatedScale(
+                  scale: 1.0 + (value * 0.15),
+                  duration: const Duration(milliseconds: 300),
+                  child: Icon(
+                    isSelected ? item.activeIcon : item.icon,
+                    color: Color.lerp(
+                      Colors.white.withValues(alpha: 0.5),
+                      Colors.white,
+                      value,
+                    ),
+                    size: 26,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  item.label,
+                  style: GoogleFonts.inter(
+                    fontSize: 10,
+                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                    color: Color.lerp(
+                      Colors.white.withValues(alpha: 0.5),
+                      Colors.white,
+                      value,
+                    )!,
+                    letterSpacing: isSelected ? 0.5 : 0,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return ClipRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-        child: Container(
-          decoration: const BoxDecoration(
-            color: GlassTokens.sidebarBg,
-            border: Border(top: BorderSide(color: GlassTokens.cardBorder, width: 1)),
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+      child: Container(
+        height: 75,
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(30),
+          border: Border.all(
+            color: theme.colorScheme.outline.withValues(alpha: 0.3),
+            width: 1,
           ),
-          child: NavigationBar(
-            selectedIndex: index,
-            onDestinationSelected: onTap,
-            backgroundColor: Colors.transparent,
-            indicatorColor: AppColors.accent.withValues(alpha: 0.15),
-            shadowColor: Colors.transparent,
-            surfaceTintColor: Colors.transparent,
-            labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-            destinations: const [
-              NavigationDestination(
-                icon: Icon(Icons.hub_outlined),
-                selectedIcon: Icon(Icons.hub),
-                label: 'GitHub',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.dashboard_outlined),
-                selectedIcon: Icon(Icons.dashboard),
-                label: 'Dashboard',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.inventory_2_outlined),
-                selectedIcon: Icon(Icons.inventory_2),
-                label: 'Containers',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.account_tree_outlined),
-                selectedIcon: Icon(Icons.account_tree),
-                label: 'Canvas',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.terminal_outlined),
-                selectedIcon: Icon(Icons.terminal),
-                label: 'Terminal',
-              ),
-            ],
+          boxShadow: [
+            BoxShadow(
+              color: theme.colorScheme.shadow.withValues(alpha: 0.2),
+              blurRadius: 20,
+              offset: const Offset(0, 10),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: List.generate(
+            _items.length,
+            (i) => _buildNavItem(context, i),
           ),
         ),
       ),

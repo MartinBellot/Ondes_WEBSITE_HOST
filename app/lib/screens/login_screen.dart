@@ -1,7 +1,8 @@
-import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, TargetPlatform;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:universal_platform/universal_platform.dart';
 import '../theme/app_theme.dart';
 import '../utils/server_config.dart';
 import '../widgets/glass_card.dart';
@@ -49,7 +50,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isMacOS = defaultTargetPlatform == TargetPlatform.macOS;
+    final isMacOS = UniversalPlatform.isMacOS;
 
     return Scaffold(
       backgroundColor: isMacOS ? Colors.transparent : null,
@@ -184,10 +185,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ),
                               ),
                               // Mobile only: allow the user to change the server URL.
-                              if (!kIsWeb &&
-                                  (defaultTargetPlatform == TargetPlatform.iOS ||
-                                      defaultTargetPlatform ==
-                                          TargetPlatform.android)) ...[
+                              if (!kIsWeb) ...[
                                 const SizedBox(height: 16),
                                 _ServerChip(serverUrl: ServerConfig.serverUrl),
                               ],

@@ -24,7 +24,9 @@ Messages sent every 3 seconds:
 import asyncio
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from rest_framework_simplejwt.tokens import AccessToken
 
@@ -60,64 +62,82 @@ def _get_docker_client():
     return None
 
 
+def _stats_for_container(c) -> dict:
+    """Fetch and parse stats for a single container (blocking, ~1 s per call)."""
+    try:
+        raw = c.stats(stream=False)
+
+        # ── CPU % ────────────────────────────────────────────────────────────
+        cpu_now  = raw['cpu_stats']['cpu_usage']['total_usage']
+        cpu_prev = raw['precpu_stats']['cpu_usage']['total_usage']
+        sys_now  = raw['cpu_stats'].get('system_cpu_usage', 0)
+        sys_prev = raw['precpu_stats'].get('system_cpu_usage', 0)
+        num_cpus = raw['cpu_stats'].get('online_cpus', 1)
+
+        cpu_delta = cpu_now  - cpu_prev
+        sys_delta = sys_now  - sys_prev
+        cpu_pct = 0.0
+        if sys_delta > 0 and cpu_delta >= 0:
+            cpu_pct = (cpu_delta / sys_delta) * num_cpus * 100.0
+
+        # ── Memory ───────────────────────────────────────────────────────────
+        mem       = raw.get('memory_stats', {})
+        mem_use   = mem.get('usage', 0)
+        mem_cache = mem.get('stats', {}).get('cache', 0)
+        mem_real  = max(0, mem_use - mem_cache)
+        mem_lim   = mem.get('limit', 1) or 1
+        mem_pct   = (mem_real / mem_lim) * 100.0
+
+        return {
+            'id':      c.id[:12],
+            'name':    c.name,
+            'status':  c.status,
+            'image':   c.image.tags[0] if c.image.tags else '',
+            'cpu_pct': round(cpu_pct,  1),
+            'mem_pct': round(mem_pct,  1),
+            'mem_mb':  round(mem_real / (1024 * 1024), 1),
+            'labels':  dict(c.labels),
+        }
+    except Exception:
+        return {
+            'id':      c.id[:12],
+            'name':    c.name,
+            'status':  c.status,
+            'image':   '',
+            'cpu_pct': 0.0,
+            'mem_pct': 0.0,
+            'mem_mb':  0.0,
+            'labels':  {},
+        }
+
+
 def _collect_metrics() -> list:
-    """Synchronously gather cpu/mem stats for every running container."""
+    """Gather cpu/mem stats for every running container **in parallel**.
+
+    docker stats(stream=False) blocks ~1 s per container while the daemon
+    collects its CPU delta.  Running all containers concurrently reduces the
+    wall-clock time from N×1 s to ~1 s regardless of container count.
+    """
     client = _get_docker_client()
     if client is None:
         return []
 
-    result = []
     try:
         containers = client.containers.list()
     except Exception:
         return []
 
-    for c in containers:
-        try:
-            raw = c.stats(stream=False)
+    if not containers:
+        return []
 
-            # ── CPU % ────────────────────────────────────────────────────
-            cpu_now  = raw['cpu_stats']['cpu_usage']['total_usage']
-            cpu_prev = raw['precpu_stats']['cpu_usage']['total_usage']
-            sys_now  = raw['cpu_stats'].get('system_cpu_usage', 0)
-            sys_prev = raw['precpu_stats'].get('system_cpu_usage', 0)
-            num_cpus = raw['cpu_stats'].get('online_cpus', 1)
-
-            cpu_delta = cpu_now  - cpu_prev
-            sys_delta = sys_now  - sys_prev
-            cpu_pct = 0.0
-            if sys_delta > 0 and cpu_delta >= 0:
-                cpu_pct = (cpu_delta / sys_delta) * num_cpus * 100.0
-
-            # ── Memory ───────────────────────────────────────────────────
-            mem      = raw.get('memory_stats', {})
-            mem_use  = mem.get('usage', 0)
-            mem_cache = mem.get('stats', {}).get('cache', 0)
-            mem_real = max(0, mem_use - mem_cache)
-            mem_lim  = mem.get('limit', 1) or 1
-            mem_pct  = (mem_real / mem_lim) * 100.0
-
-            result.append({
-                'id':      c.id[:12],
-                'name':    c.name,
-                'status':  c.status,
-                'image':   c.image.tags[0] if c.image.tags else '',
-                'cpu_pct': round(cpu_pct,  1),
-                'mem_pct': round(mem_pct,  1),
-                'mem_mb':  round(mem_real / (1024 * 1024), 1),
-                'labels':  dict(c.labels),
-            })
-        except Exception:
-            result.append({
-                'id':      c.id[:12],
-                'name':    c.name,
-                'status':  c.status,
-                'image':   '',
-                'cpu_pct': 0.0,
-                'mem_pct': 0.0,
-                'mem_mb':  0.0,
-                'labels':  {},
-            })
+    with ThreadPoolExecutor(max_workers=min(len(containers), 16)) as pool:
+        futures = {pool.submit(_stats_for_container, c): c for c in containers}
+        result = []
+        for fut in as_completed(futures):
+            try:
+                result.append(fut.result())
+            except Exception:
+                pass
 
     return result
 

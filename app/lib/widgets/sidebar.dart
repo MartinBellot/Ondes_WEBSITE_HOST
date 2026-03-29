@@ -1,5 +1,5 @@
 import 'dart:ui';
-import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, TargetPlatform;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -19,9 +19,7 @@ class Sidebar extends StatelessWidget {
   static const _items = [
     _NavItem(icon: Icons.hub_outlined,          selectedIcon: Icons.hub,           label: 'GitHub'),
     _NavItem(icon: Icons.dashboard_outlined,    selectedIcon: Icons.dashboard,     label: 'Dashboard'),
-    _NavItem(icon: Icons.inventory_2_outlined,  selectedIcon: Icons.inventory_2,   label: 'Containers'),
     _NavItem(icon: Icons.account_tree_outlined, selectedIcon: Icons.account_tree,  label: 'Canvas'),
-    _NavItem(icon: Icons.terminal_outlined,     selectedIcon: Icons.terminal,      label: 'Terminal'),
   ];
 
   @override
@@ -38,7 +36,7 @@ class Sidebar extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) const SizedBox(height: 28),
+              if (!kIsWeb) const SizedBox(height: 28),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
                 child: Row(

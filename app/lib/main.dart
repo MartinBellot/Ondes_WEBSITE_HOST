@@ -1,6 +1,6 @@
-import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:universal_platform/universal_platform.dart';
 import 'theme/app_theme.dart';
 import 'providers/auth_provider.dart';
 import 'providers/docker_provider.dart';
@@ -37,16 +37,11 @@ class OndesApp extends StatelessWidget {
     // On macOS the NSVisualEffectView (MainFlutterWindow.swift) provides the
     // frosted-glass window background; Flutter's scaffold must be transparent
     // so the native vibrancy shows through.
-    final isMacOS = !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
+    final isMacOS = UniversalPlatform.isMacOS;
     final theme = AppTheme().ultraDarkTheme.copyWith(
       scaffoldBackgroundColor:
           isMacOS ? Colors.transparent : AppColors.background,
     );
-
-    // Mobile platforms require the user to enter the server URL on first launch.
-    final isMobile = !kIsWeb &&
-        (defaultTargetPlatform == TargetPlatform.iOS ||
-            defaultTargetPlatform == TargetPlatform.android);
 
     return MaterialApp(
       title: 'Ondes',
@@ -55,7 +50,7 @@ class OndesApp extends StatelessWidget {
       home: Consumer<AuthProvider>(
         builder: (context, auth, _) {
           // Step 1 (mobile only): server URL not configured yet.
-          if (isMobile && !ServerConfig.isConfigured) {
+          if (!ServerConfig.isConfigured) {
             return const ServerSetupScreen();
           }
 

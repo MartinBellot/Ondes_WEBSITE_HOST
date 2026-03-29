@@ -271,12 +271,19 @@ def deploy_app(app_id: int):
     clone_url = f'https://{token}@github.com/{repo}.git'
 
     if os.path.exists(os.path.join(project_dir, '.git')):
-        _broadcast(app_id, f'📦 Mise à jour du dépôt (git pull origin {branch})...')
-        # Discard any local modifications so the pull can never be blocked
-        subprocess.run(['git', 'reset', '--hard', 'HEAD'], cwd=project_dir, capture_output=True)
-        subprocess.run(['git', 'clean', '-fd'], cwd=project_dir, capture_output=True)
+        _broadcast(app_id, f'📦 Mise à jour du dépôt (fetch + reset origin/{branch})...')
+        # Refresh the remote URL in case the OAuth token has rotated.
+        subprocess.run(
+            ['git', 'remote', 'set-url', 'origin', clone_url],
+            cwd=project_dir, capture_output=True,
+        )
+        # Fetch then hard-reset to remote HEAD.
+        # We intentionally do NOT run `git clean` here: bind-mounted data
+        # directories (e.g. ./data/ for SQLite + media) live as untracked
+        # paths inside project_dir and must be preserved across redeploys.
+        subprocess.run(['git', 'fetch', 'origin'], cwd=project_dir, capture_output=True)
         rc = _run_streaming(
-            ['git', 'pull', 'origin', branch],
+            ['git', 'reset', '--hard', f'origin/{branch}'],
             cwd=project_dir,
             app_id=app_id,
         )

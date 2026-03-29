@@ -118,12 +118,6 @@ guard; prefer cross-platform packages.
 - Match the existing `theme/` colours and text styles — do not hard-code colours.
 - **Navigation:** uses `Navigator` + `MaterialPageRoute`. For content nested inside
   the app shell, use `MainShell.contentNavKey.currentState!.push(...)`. No GoRouter.
-- **macOS vibrancy:** the scaffold background must be `Colors.transparent` on macOS
-  so the native `NSVisualEffectView` frosted-glass shows through. Always check
-  `defaultTargetPlatform == TargetPlatform.macOS` before overriding background colour.
-- **Dual-target rule:** every screen and widget must work on **both macOS desktop
-  and web**. Wrap any platform-specific code in `kIsWeb` / `defaultTargetPlatform`
-  guards. Prefer packages that support both targets.
 
 ### General
 - No TODO comments left in committed code.

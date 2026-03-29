@@ -8,6 +8,7 @@
 **A modern, open-source WEB Infrastructure, for everyone**
 
 Deploy GitHub/(Gitlab 🏗️) projects as Docker Stacks, manage NGINX vhosts, issue SSL certs, run SSH sessions, and monitor your infrastructure — all from a powerful and easy interface.
+You just have to put docker-compose.yml in your repo.
 
 [![Django](https://img.shields.io/badge/Django-5.0-092E20?style=flat-square&logo=django&logoColor=white)](https://www.djangoproject.com/)
 [![Flutter](https://img.shields.io/badge/Flutter-3.43-02569B?style=flat-square&logo=flutter&logoColor=white)](https://flutter.dev/)
