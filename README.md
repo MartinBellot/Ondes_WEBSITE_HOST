@@ -61,11 +61,8 @@ The script installs Docker, **builds the images directly from source** on your V
 
 | | |
 |---|---|
-| <!-- SCREENSHOT: Dashboard overview with container count cards and Docker health banner --> ![Dashboard](.github/screenshots/dashboard.png) | <!-- SCREENSHOT: GitHub repo browser with branch selector and deploy button --> ![GitHub Integration](.github/screenshots/github.png) |
-| <!-- SCREENSHOT: Stack Detail — Logs tab with real-time deploy output --> ![Deploy Logs](.github/screenshots/deploy_logs.png) | <!-- SCREENSHOT: Domaine & SSL tab with DNS propagation checker --> ![SSL Manager](.github/screenshots/ssl.png) |
-| <!-- SCREENSHOT: Infrastructure Canvas — zoomable graph of all running containers --> ![Canvas](.github/screenshots/canvas.png) | <!-- SCREENSHOT: SSH Terminal screen with live WebSocket shell --> ![SSH Terminal](.github/screenshots/ssh.png) |
-
-> 📌 *Screenshots coming soon! Run the app locally and send us yours — see [CONTRIBUTING.md](CONTRIBUTING.md).*
+| ![Deploy Logs — real-time container output](.github/screenshots/1.png) | ![Domaine & SSL — NGINX vhosts and SSL cert management](.github/screenshots/2.png) |
+| ![CI/CD — automatic deployment webhook setup](.github/screenshots/3.png) | ![Console — live WebSocket shell inside a container](.github/screenshots/4.png) |
 
 ---
 
