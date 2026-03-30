@@ -7,9 +7,17 @@ from decouple import config
 # Suppress noisy TripleDES deprecation warnings from paramiko (harmless, fixed upstream in paramiko 4+)
 warnings.filterwarnings('ignore', message='TripleDES has been moved', module='paramiko')
 
+import hashlib as _hashlib, base64 as _b64
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = config('SECRET_KEY', default='dev-secret-key-change-in-production')
+
+# Fernet key for symmetric encryption of OAuth tokens (derived from SECRET_KEY).
+# Changing SECRET_KEY invalidates all stored tokens — users must reconnect GitHub.
+TOKEN_ENCRYPTION_KEY = _b64.urlsafe_b64encode(
+    _hashlib.sha256(SECRET_KEY.encode()).digest()
+)
 DEBUG = config('DEBUG', default=True, cast=bool)
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='*').split(',')
 
@@ -111,12 +119,17 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
+    'DEFAULT_THROTTLE_CLASSES': [],
+    'DEFAULT_THROTTLE_RATES': {
+        'login':    '10/min',
+        'register': '5/min',
+    },
 }
 
 # ─── JWT ──────────────────────────────────────────────────────────────────────
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=90),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=14),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'UPDATE_LAST_LOGIN': True,

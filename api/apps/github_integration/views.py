@@ -2,6 +2,7 @@ import secrets
 import urllib.error
 import urllib.parse
 
+from django.conf import settings
 from django.core.cache import cache
 from django.http import HttpResponse
 from django.views import View
@@ -25,7 +26,7 @@ class GitHubOAuthConfigView(APIView):
         cfg = GitHubOAuthConfig.get()
         callback_url = request.build_absolute_uri('/api/github/oauth/callback/')
         if cfg:
-            secret = cfg.client_secret
+            secret = cfg.decrypted_secret
             hint = secret[:4] + '*' * max(0, len(secret) - 4)
             return Response({
                 'configured': True,
@@ -90,7 +91,7 @@ class GitHubOAuthCallbackView(View):
     """GitHub redirects here — no DRF auth needed, uses state→user_id cache."""
 
     def get(self, request):
-        frontend_url = 'http://localhost:3000'
+        frontend_url = settings.FRONTEND_URL
         code = request.GET.get('code', '')
         state = request.GET.get('state', '')
         error = request.GET.get('error', '')
@@ -107,7 +108,7 @@ class GitHubOAuthCallbackView(View):
                 '<script>'
                 'try{'
                 'if(window.opener){'
-                f'window.opener.postMessage({{type:"github_oauth",success:{js}}},"*");'
+                f'window.opener.postMessage({{type:"github_oauth",success:{js}}},"{frontend_url}");'
                 'setTimeout(function(){window.close();},800);'
                 '}else{'
                 f'setTimeout(function(){{window.location.href="{frontend_url}";}},1500);'
@@ -135,7 +136,7 @@ class GitHubOAuthCallbackView(View):
             return _page(False, 'OAuth non configure')
 
         try:
-            token_data = services.exchange_code_for_token(cfg.client_id, cfg.client_secret, code)
+            token_data = services.exchange_code_for_token(cfg.client_id, cfg.decrypted_secret, code)
             access_token = token_data.get('access_token', '')
             if not access_token:
                 return _page(False, token_data.get('error_description', 'Token manquant'))
@@ -194,7 +195,7 @@ class GitHubReposView(APIView):
 
     def get(self, request):
         try:
-            token = request.user.github_profile.access_token
+            token = request.user.github_profile.decrypted_token
         except GitHubProfile.DoesNotExist:
             return Response({'error': 'GitHub non connecte'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -227,7 +228,7 @@ class GitHubBranchesView(APIView):
 
     def get(self, request, owner, repo):
         try:
-            token = request.user.github_profile.access_token
+            token = request.user.github_profile.decrypted_token
         except GitHubProfile.DoesNotExist:
             return Response({'error': 'GitHub non connecte'}, status=status.HTTP_403_FORBIDDEN)
         try:
@@ -244,7 +245,7 @@ class GitHubComposeFilesView(APIView):
 
     def get(self, request, owner, repo):
         try:
-            token = request.user.github_profile.access_token
+            token = request.user.github_profile.decrypted_token
         except GitHubProfile.DoesNotExist:
             return Response({'error': 'GitHub non connecte'}, status=status.HTTP_403_FORBIDDEN)
 

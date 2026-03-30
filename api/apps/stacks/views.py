@@ -179,7 +179,7 @@ class ComposeAppUpdateCheckView(APIView):
             return Response({'error': 'Projet introuvable'}, status=status.HTTP_404_NOT_FOUND)
 
         try:
-            token = app.user.github_profile.access_token
+            token = app.user.github_profile.decrypted_token
         except Exception:
             return Response(
                 {'error': 'Compte GitHub non connecté'},

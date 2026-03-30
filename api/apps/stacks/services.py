@@ -249,7 +249,7 @@ def deploy_app(app_id: int):
     app = ComposeApp.objects.select_related('user__github_profile').get(pk=app_id)
 
     try:
-        token = app.user.github_profile.access_token
+        token = app.user.github_profile.decrypted_token
     except Exception:
         _set_status(app, 'error', 'Compte GitHub non connecté — connectez GitHub d\'abord.')
         _broadcast(app_id, '❌ Compte GitHub non connecté.', 'error')
