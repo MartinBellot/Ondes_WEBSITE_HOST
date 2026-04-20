@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -10,7 +12,22 @@ import '../utils/server_config.dart';
 ///   3. Current page origin + /api  (production web)
 ///   4. http://localhost:8000/api   (local dev fallback)
 class ApiService {
+  // ── Singleton ──────────────────────────────────────────────────────────────
+  // A single shared instance ensures there is exactly ONE Dio client and ONE
+  // refresh-token flow across the entire app.  This eliminates two races:
+  //   1. Multiple ApiService instances all trying to refresh simultaneously
+  //      (second attempt hits a blacklisted token → force-logout).
+  //   2. Two concurrent 401s on the SAME instance both entering the refresh
+  //      logic before _isRefreshing is set (check-then-act race).
+  // The Completer-based _refreshTokenOnce() serialises all concurrent 401s so
+  // exactly one network call is made and every waiting request gets the result.
+  static final ApiService _instance = ApiService._internal();
+  factory ApiService() => _instance;
+
   static const _envUrl = String.fromEnvironment('API_URL');
+
+  /// Returns the API base URL (public accessor for use across the app).
+  static String get baseUrl => _baseUrl;
 
   /// Returns the API base URL.
   static String get _baseUrl {
@@ -36,10 +53,12 @@ class ApiService {
   /// Wire this up to trigger a global logout in your AuthProvider.
   void Function()? onForceLogout;
 
-  /// Whether a refresh is already in flight (prevents concurrent refresh loops).
-  bool _isRefreshing = false;
+  /// In-flight refresh completer.  Non-null while a refresh is running.
+  /// Subsequent 401s await this future instead of starting a second refresh,
+  /// preventing concurrent rotations that would blacklist the token.
+  Completer<String?>? _refreshCompleter;
 
-  ApiService() {
+  ApiService._internal() {
     _dio = Dio(BaseOptions(
       baseUrl: _baseUrl,
       connectTimeout: const Duration(seconds: 10),
@@ -57,57 +76,81 @@ class ApiService {
         handler.next(options);
       },
       onError: (DioException error, handler) async {
-        // Only intercept 401s on non-refresh endpoints to avoid infinite loops.
         final path = error.requestOptions.path;
+        final alreadyRetried = error.requestOptions.extra['_retried'] == true;
+
         if (error.response?.statusCode == 401 &&
             !path.contains('/auth/refresh/') &&
             !path.contains('/auth/login/') &&
-            !_isRefreshing) {
-          _isRefreshing = true;
-          try {
-            final prefs = await SharedPreferences.getInstance();
-            final refreshToken = prefs.getString('refresh_token');
-            if (refreshToken == null) {
-              _isRefreshing = false;
-              onForceLogout?.call();
+            !alreadyRetried) {
+          // Serialise: if a refresh is already running, wait for its result.
+          final newToken = await _refreshTokenOnce();
+          if (newToken != null) {
+            final opts = error.requestOptions;
+            opts.headers['Authorization'] = 'Bearer $newToken';
+            opts.extra['_retried'] = true;
+            try {
+              final retryResponse = await _dio.fetch(opts);
+              return handler.resolve(retryResponse);
+            } catch (_) {
               return handler.next(error);
             }
-
-            // Use a bare Dio to avoid re-triggering this interceptor.
-            final refreshDio = Dio(BaseOptions(baseUrl: _baseUrl));
-            final res = await refreshDio.post('/auth/refresh/', data: {
-              'refresh': refreshToken,
-            });
-
-            final newAccess = res.data['access'] as String;
-            // simplejwt ROTATE_REFRESH_TOKENS returns a new refresh token.
-            final newRefresh = res.data['refresh'] as String?;
-
-            await prefs.setString('access_token', newAccess);
-            if (newRefresh != null) {
-              await prefs.setString('refresh_token', newRefresh);
-            }
-
-            _isRefreshing = false;
-
-            // Retry the original request with the new access token.
-            final opts = error.requestOptions;
-            opts.headers['Authorization'] = 'Bearer $newAccess';
-            final retryResponse = await _dio.fetch(opts);
-            return handler.resolve(retryResponse);
-          } catch (_) {
-            _isRefreshing = false;
-            // Refresh failed — force logout.
-            final prefs = await SharedPreferences.getInstance();
-            await prefs.remove('access_token');
-            await prefs.remove('refresh_token');
-            onForceLogout?.call();
-            return handler.next(error);
           }
+          return handler.next(error);
         }
         handler.next(error);
       },
     ));
+  }
+
+  /// Refresh the access token exactly once even when called concurrently.
+  ///
+  /// Returns the new access token on success, or null on failure
+  /// (in which case [onForceLogout] is called and tokens are cleared).
+  Future<String?> _refreshTokenOnce() async {
+    // Already in flight — join the existing attempt.
+    if (_refreshCompleter != null) {
+      return _refreshCompleter!.future;
+    }
+
+    _refreshCompleter = Completer<String?>();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final refreshToken = prefs.getString('refresh_token');
+      if (refreshToken == null) {
+        _refreshCompleter!.complete(null);
+        _refreshCompleter = null;
+        onForceLogout?.call();
+        return null;
+      }
+
+      // Use a bare Dio to avoid re-triggering this interceptor.
+      final refreshDio = Dio(BaseOptions(baseUrl: _baseUrl));
+      final res = await refreshDio.post('/auth/refresh/', data: {
+        'refresh': refreshToken,
+      });
+
+      final newAccess = res.data['access'] as String;
+      final newRefresh = res.data['refresh'] as String?;
+
+      await prefs.setString('access_token', newAccess);
+      if (newRefresh != null) {
+        await prefs.setString('refresh_token', newRefresh);
+      }
+
+      _refreshCompleter!.complete(newAccess);
+      _refreshCompleter = null;
+      return newAccess;
+    } catch (_) {
+      _refreshCompleter!.complete(null);
+      _refreshCompleter = null;
+      // Refresh failed — clear tokens and trigger logout.
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('access_token');
+      await prefs.remove('refresh_token');
+      onForceLogout?.call();
+      return null;
+    }
   }
 
   /// Refreshes the Dio base URL from [ServerConfig].

@@ -190,14 +190,35 @@ class GitHubProfileView(APIView):
 
 # ── Repo browser ──────────────────────────────────────────────────────────────
 
+def _github_http_status(github_code: int) -> int:
+    """Map a GitHub API HTTP status to a safe DRF response status.
+
+    GitHub 401 (bad OAuth token) and 403 (rate-limit / forbidden) must NOT be
+    forwarded as-is because Dio's JWT interceptor treats any HTTP 401 from the
+    backend as an expired JWT and enters an infinite refresh-retry loop.
+    Map them to 502 Bad Gateway (our server failed to talk to GitHub).
+    """
+    if github_code in (401, 403):
+        return status.HTTP_502_BAD_GATEWAY
+    return github_code
+
+
 class GitHubReposView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        from cryptography.fernet import InvalidToken
         try:
             token = request.user.github_profile.decrypted_token
         except GitHubProfile.DoesNotExist:
             return Response({'error': 'GitHub non connecte'}, status=status.HTTP_403_FORBIDDEN)
+        except InvalidToken:
+            # SECRET_KEY rotation made the stored OAuth token undecryptable.
+            # Tell the client the GitHub connection must be re-established.
+            return Response(
+                {'error': 'Token GitHub invalide — veuillez reconnecter GitHub'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         page = int(request.GET.get('page', 1))
         try:
@@ -218,7 +239,10 @@ class GitHubReposView(APIView):
                 for r in repos
             ])
         except urllib.error.HTTPError as e:
-            return Response({'error': f'GitHub API error: {e.code}'}, status=e.code)
+            return Response(
+                {'error': f'GitHub API error: {e.code}'},
+                status=_github_http_status(e.code),
+            )
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
@@ -227,15 +251,24 @@ class GitHubBranchesView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, owner, repo):
+        from cryptography.fernet import InvalidToken
         try:
             token = request.user.github_profile.decrypted_token
         except GitHubProfile.DoesNotExist:
             return Response({'error': 'GitHub non connecte'}, status=status.HTTP_403_FORBIDDEN)
+        except InvalidToken:
+            return Response(
+                {'error': 'Token GitHub invalide — veuillez reconnecter GitHub'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         try:
             branches = services.list_branches(token, owner, repo)
             return Response([b['name'] for b in branches])
         except urllib.error.HTTPError as e:
-            return Response({'error': f'GitHub API error: {e.code}'}, status=e.code)
+            return Response(
+                {'error': f'GitHub API error: {e.code}'},
+                status=_github_http_status(e.code),
+            )
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
@@ -244,10 +277,16 @@ class GitHubComposeFilesView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, owner, repo):
+        from cryptography.fernet import InvalidToken
         try:
             token = request.user.github_profile.decrypted_token
         except GitHubProfile.DoesNotExist:
             return Response({'error': 'GitHub non connecte'}, status=status.HTTP_403_FORBIDDEN)
+        except InvalidToken:
+            return Response(
+                {'error': 'Token GitHub invalide — veuillez reconnecter GitHub'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         branch = request.GET.get('branch', 'main')
         try:
@@ -255,7 +294,10 @@ class GitHubComposeFilesView(APIView):
             env_template = services.detect_env_template(token, owner, repo, branch)
             return Response({'compose_files': compose_files, 'env_template': env_template})
         except urllib.error.HTTPError as e:
-            return Response({'error': f'GitHub API error: {e.code}'}, status=e.code)
+            return Response(
+                {'error': f'GitHub API error: {e.code}'},
+                status=_github_http_status(e.code),
+            )
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 

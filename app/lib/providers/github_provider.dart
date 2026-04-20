@@ -39,9 +39,13 @@ class GitHubProvider extends ChangeNotifier {
   // ── Repos ────────────────────────────────────────────────────────────────
   List<dynamic> _repos = [];
   bool _isLoadingRepos = false;
+  /// True once the first fetch attempt has been made (success or failure).
+  /// Prevents the auto-trigger listener from looping on repeated failures.
+  bool _reposInitialized = false;
 
   List<dynamic> get repos => _repos;
   bool get isLoadingRepos => _isLoadingRepos;
+  bool get reposInitialized => _reposInitialized;
 
   // ── Branches + compose ──────────────────────────────────────────────────
   List<String> _branches = [];
@@ -157,6 +161,7 @@ class GitHubProvider extends ChangeNotifier {
     _name = null;
     _avatarUrl = null;
     _repos = [];
+    _reposInitialized = false;
     _branches = [];
     _composeFiles = [];
     _envTemplate = {};
@@ -164,6 +169,7 @@ class GitHubProvider extends ChangeNotifier {
   }
 
   Future<void> fetchRepos() async {
+    _reposInitialized = true;
     _isLoadingRepos = true;
     _error = null;
     notifyListeners();
@@ -171,6 +177,9 @@ class GitHubProvider extends ChangeNotifier {
       _repos = await _api.githubListRepos();
     } catch (e) {
       _error = e.toString();
+      // Reset the flag so that a subsequent successful login can auto-trigger
+      // a fresh fetch (e.g. after a forced logout caused by expired tokens).
+      _reposInitialized = false;
     }
     _isLoadingRepos = false;
     notifyListeners();

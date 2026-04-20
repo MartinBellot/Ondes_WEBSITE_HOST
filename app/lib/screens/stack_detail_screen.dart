@@ -709,24 +709,26 @@ class _DeployLogTab extends StatelessWidget {
       );
     }
 
-    return ListView.builder(
-      controller: scrollCtrl,
-      padding: const EdgeInsets.all(12),
-      itemCount: logs.length,
-      itemBuilder: (_, i) {
-        final entry = logs[i];
-        final color = _levelColors[entry.level] ?? AppColors.textPrimary;
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 1),
-          child: Text(
-            entry.message,
-            style: TextStyle(
-                color: color,
-                fontSize: 12,
-                fontFamily: 'monospace'),
-          ),
-        );
-      },
+    return SelectionArea(
+      child: ListView.builder(
+        controller: scrollCtrl,
+        padding: const EdgeInsets.all(12),
+        itemCount: logs.length,
+        itemBuilder: (_, i) {
+          final entry = logs[i];
+          final color = _levelColors[entry.level] ?? AppColors.textPrimary;
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 1),
+            child: Text(
+              entry.message,
+              style: TextStyle(
+                  color: color,
+                  fontSize: 12,
+                  fontFamily: 'monospace'),
+            ),
+          );
+        },
+      ),
     );
   }
 }

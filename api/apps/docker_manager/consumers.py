@@ -187,3 +187,139 @@ class MetricsConsumer(AsyncWebsocketConsumer):
             except Exception:
                 pass
             await asyncio.sleep(3)
+
+
+class ExecConsumer(AsyncWebsocketConsumer):
+    """Interactive shell inside a Docker container, exposed via WebSocket.
+
+    URL: ws://host/ws/exec/{container_id}/?token=ACCESS_TOKEN
+
+    Client → server:
+        { "type": "input", "data": "ls -la\\n" }
+
+    Server → client:
+        { "type": "connected", "message": "Connected to <container_name>" }
+        { "type": "output",    "data": "<terminal output>" }
+        { "type": "error",     "message": "<reason>" }
+    """
+
+    async def connect(self):
+        import threading
+        from urllib.parse import parse_qs
+
+        qs = parse_qs(self.scope.get('query_string', b'').decode())
+        token_str = (qs.get('token', [None]) or [None])[0]
+
+        user_id = _get_user_id(token_str) if token_str else None
+        if not user_id:
+            await self.accept()
+            await self.close(code=4001)
+            return
+
+        self._container_id = self.scope['url_route']['kwargs']['container_id']
+        self._exec_socket  = None
+        self._stopped      = False
+        self._loop         = asyncio.get_event_loop()
+
+        await self.accept()
+
+        t = threading.Thread(target=self._exec_thread, daemon=True)
+        t.start()
+
+    async def disconnect(self, code):
+        self._stopped = True
+        sock = self._exec_socket
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+    async def receive(self, text_data):
+        try:
+            data = json.loads(text_data)
+            if data.get('type') == 'input':
+                raw = (data.get('data') or '').encode('utf-8', errors='replace')
+                sock = self._exec_socket
+                if sock and raw:
+                    try:
+                        sock.send(raw)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    # ── Background thread ─────────────────────────────────────────────────
+
+    def _send_from_thread(self, payload: dict):
+        """Thread-safe helper to push a JSON message to the WebSocket."""
+        asyncio.run_coroutine_threadsafe(
+            self.send(json.dumps(payload)),
+            self._loop,
+        )
+
+    def _exec_thread(self):
+        client = _get_docker_client()
+        if client is None:
+            self._send_from_thread({'type': 'error', 'message': 'Docker unavailable'})
+            return
+
+        try:
+            container = client.containers.get(self._container_id)
+        except Exception as exc:
+            self._send_from_thread({'type': 'error', 'message': f'Container not found: {exc}'})
+            return
+
+        sock = None
+        for shell in ('/bin/bash', '/bin/sh'):
+            try:
+                exec_id = client.api.exec_create(
+                    container.id,
+                    [shell],
+                    stdin=True,
+                    tty=True,
+                    stdout=True,
+                    stderr=True,
+                )
+                sock = client.api.exec_start(
+                    exec_id['Id'],
+                    detach=False,
+                    tty=True,
+                    socket=True,
+                )
+                break
+            except Exception:
+                continue
+
+        if sock is None:
+            self._send_from_thread({'type': 'error', 'message': 'Could not start shell in container'})
+            return
+
+        # Unwrap to the raw socket object if the SDK wraps it
+        raw_sock = getattr(sock, '_sock', sock)
+        self._exec_socket = raw_sock
+
+        self._send_from_thread({
+            'type': 'connected',
+            'message': f'Connected to {container.name}',
+        })
+
+        try:
+            while not self._stopped:
+                try:
+                    chunk = raw_sock.recv(4096)
+                except Exception:
+                    break
+                if not chunk:
+                    break
+                self._send_from_thread({
+                    'type': 'output',
+                    'data': chunk.decode('utf-8', errors='replace'),
+                })
+        finally:
+            self._stopped = True
+            try:
+                raw_sock.close()
+            except Exception:
+                pass
+            asyncio.run_coroutine_threadsafe(self.close(), self._loop)

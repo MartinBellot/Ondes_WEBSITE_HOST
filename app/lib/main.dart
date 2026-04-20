@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:universal_platform/universal_platform.dart';
@@ -49,8 +50,9 @@ class OndesApp extends StatelessWidget {
       theme: theme,
       home: Consumer<AuthProvider>(
         builder: (context, auth, _) {
-          // Step 1 (mobile only): server URL not configured yet.
-          if (!ServerConfig.isConfigured) {
+          // Step 1 (macOS / iOS only): server URL not configured yet.
+          // On web the URL is derived from the page origin — no user config needed.
+          if (!kIsWeb && !ServerConfig.isConfigured) {
             return const ServerSetupScreen();
           }
 

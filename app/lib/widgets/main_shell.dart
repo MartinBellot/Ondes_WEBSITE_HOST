@@ -46,7 +46,7 @@ class _MainShellState extends State<MainShell> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final gh = context.read<GitHubProvider>();
       await gh.loadProfile();
-      if (gh.connected && gh.repos.isEmpty) gh.fetchRepos();
+      if (gh.connected && !gh.reposInitialized && !gh.isLoadingRepos) gh.fetchRepos();
       if (mounted) context.read<StacksProvider>().fetchStacks();
     });
   }

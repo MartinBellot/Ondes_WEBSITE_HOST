@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../providers/github_provider.dart';
+import '../services/api_service.dart';
 import '../utils/oauth_launcher.dart';
 import '../providers/stacks_provider.dart';
 import '../theme/app_theme.dart';
@@ -27,16 +28,22 @@ class _GitHubScreenState extends State<GitHubScreen>
   String _repoFilter = '';
   Timer? _authPollTimer;
 
+  // Stored during initState so dispose() can remove the listener without
+  // touching context (which is illegal once the element is deactivated).
+  GitHubProvider? _ghProvider;
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       final gh = context.read<GitHubProvider>();
       final stacks = context.read<StacksProvider>();
+      _ghProvider = gh;
       // Fetch repos if profile is already loaded (e.g. navigating back to this tab).
-      if (gh.connected && gh.repos.isEmpty) gh.fetchRepos();
+      if (gh.connected && !gh.reposInitialized && !gh.isLoadingRepos) gh.fetchRepos();
       if (stacks.stacks.isEmpty) stacks.fetchStacks();
       // Also listen for the profile finishing load (covers cold-start race condition).
       gh.addListener(_onGitHubProviderChange);
@@ -44,8 +51,9 @@ class _GitHubScreenState extends State<GitHubScreen>
   }
 
   void _onGitHubProviderChange() {
+    if (!mounted) return;
     final gh = context.read<GitHubProvider>();
-    if (gh.connected && gh.repos.isEmpty && !gh.isLoadingRepos) {
+    if (gh.connected && !gh.reposInitialized && !gh.isLoadingRepos) {
       gh.fetchRepos();
     }
   }
@@ -55,13 +63,8 @@ class _GitHubScreenState extends State<GitHubScreen>
     _authPollTimer?.cancel();
     _tabController.dispose();
     _repoSearchCtrl.dispose();
-    // Remove the profile-change listener safely.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Provider may already be disposed, wrap in try.
-      try {
-        context.read<GitHubProvider>().removeListener(_onGitHubProviderChange);
-      } catch (_) {}
-    });
+    // Use the stored reference — context.read() is forbidden in dispose().
+    _ghProvider?.removeListener(_onGitHubProviderChange);
     super.dispose();
   }
 
@@ -305,12 +308,22 @@ class _NotConnectedViewState extends State<_NotConnectedView> {
   Widget _buildWizard(GitHubProvider gh) {
     final callbackUrl = gh.callbackUrl ?? '';
     // Derive homepage URL from callbackUrl: same host but port 3000 (app).
-    String homepageUrl = 'http://localhost:3000/';
+    // Fall back to the real ApiService base URL host when not yet configured.
+    String homepageUrl;
     if (callbackUrl.isNotEmpty) {
       try {
         final uri = Uri.parse(callbackUrl);
         homepageUrl = Uri(scheme: uri.scheme, host: uri.host, port: 3000, path: '/').toString();
-      } catch (_) {}
+      } catch (_) {
+        homepageUrl = 'http://localhost:3000/';
+      }
+    } else {
+      try {
+        final apiUri = Uri.parse(ApiService.baseUrl);
+        homepageUrl = Uri(scheme: apiUri.scheme, host: apiUri.host, port: 3000, path: '/').toString();
+      } catch (_) {
+        homepageUrl = 'http://localhost:3000/';
+      }
     }
 
     return Center(
@@ -402,7 +415,7 @@ class _NotConnectedViewState extends State<_NotConnectedView> {
                     _FormFieldGuide(
                       label: 'Authorization callback URL',
                       hint: 'URL vers laquelle GitHub redirige après l\'authentification. Doit correspondre exactement.',
-                      value: callbackUrl.isNotEmpty ? callbackUrl : 'http://localhost:8000/api/github/oauth/callback/',
+                      value: callbackUrl.isNotEmpty ? callbackUrl : '${ApiService.baseUrl}/github/oauth/callback/',
                       copiable: true,
                       highlighted: true,
                     ),
@@ -450,7 +463,7 @@ class _NotConnectedViewState extends State<_NotConnectedView> {
                     ),
                     if (_saveError != null) ...[
                       const SizedBox(height: 8),
-                      Text(_saveError!,
+                      SelectableText(_saveError!,
                           style: const TextStyle(
                               color: AppColors.accentRed, fontSize: 13)),
                     ],
