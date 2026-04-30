@@ -2340,7 +2340,10 @@ class _AddVhostDialogState extends State<_AddVhostDialog> {
   }
 
   Widget _buildPortDropdown() {
-    final ports = _selectedPorts;
+    final seen = <int?>{};
+    final ports = _selectedPorts
+        .where((p) => seen.add(p['host_port'] as int?))
+        .toList();
     final currentHostPort = int.tryParse(_portCtrl.text);
     return DropdownButtonFormField<int>(
       initialValue: currentHostPort,
