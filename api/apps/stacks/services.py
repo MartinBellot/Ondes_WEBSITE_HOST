@@ -249,6 +249,22 @@ def deploy_app(app_id: int):
     app = ComposeApp.objects.select_related('user__github_profile').get(pk=app_id)
 
     try:
+        _deploy_app_inner(app, app_id)
+    except Exception as exc:
+        # Safety net: any unhandled exception in the deploy thread must never
+        # leave the status stuck on 'building'. Always transition to 'error'.
+        import traceback
+        msg = f'Erreur inattendue : {exc}'
+        try:
+            _broadcast(app_id, f'❌ {msg}\n{traceback.format_exc()}', 'error')
+            _set_status(app, 'error', msg)
+        except Exception:
+            pass
+
+
+def _deploy_app_inner(app: 'ComposeApp', app_id: int):
+    """Inner deploy logic — called exclusively from deploy_app()."""
+    try:
         token = app.user.github_profile.decrypted_token
     except Exception:
         _set_status(app, 'error', 'Compte GitHub non connecté — connectez GitHub d\'abord.')
